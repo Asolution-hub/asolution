@@ -1,0 +1,529 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code when working with this repository.
+
+## Important: Development Rules
+
+- Do NOT invent features not described in this document
+- Do NOT remove safeguards
+- Always explain why something exists
+- Ask before making breaking changes
+- When giving code: specify file path, give copy-paste-ready snippets
+- If something is unclear, ask before guessing
+- Do not simplify unless explicitly instructed
+
+---
+
+## 1. Product Overview
+
+**Attenda** is a premium SaaS tool that helps service businesses reduce no-show appointments.
+
+- **Domain**: Attenda.io
+- **This is a real, paid product** — assume real users, real money, legal implications, and long-term maintenance
+- Landing page + Dashboard live in one Next.js project
+- Both share the same design language, UI components, and UX quality
+
+**Design principles**: Premium, Calm, Trustworthy, Modern
+
+**Design system** (as of 2026-02-01):
+- Colors: Indigo primary (`#6366F1`), Teal accent (`#14B8A6`)
+- Typography: Inter font (weights 400-800)
+- Style: DataPulse-inspired SaaS analytics aesthetic
+
+---
+
+## 2. Core Value Proposition
+
+Businesses lose money because customers don't show up.
+
+Attenda solves this by:
+- Sending booking confirmations
+- Clearly explaining no-show rules
+- Requiring payment authorization via Stripe
+- Charging **only** if the business manually confirms a no-show
+
+**Critical rules:**
+- No automatic charging ever
+- No hidden behavior
+- No money charged unless business explicitly marks no-show
+
+---
+
+## 3. Commands
+
+All commands run from `/App/attenda/`:
+
+```bash
+npm run dev      # Start development server (port 3000)
+npm run build    # Production build
+npm run lint     # ESLint
+```
+
+---
+
+## 4. Tech Stack
+
+- **Framework**: Next.js 16 with App Router, React 19, TypeScript
+- **Styling**: Tailwind CSS 4
+- **Database/Auth**: Supabase (PostgreSQL + magic link auth)
+- **Payments**: Stripe (subscriptions + card authorization)
+- **External APIs**: Google Calendar (OAuth2), Resend (email)
+- **Path alias**: `@/*` maps to project root
+
+---
+
+## 5. Architecture
+
+### Directory Structure
+
+```
+App/attenda/
+├── app/
+│   ├── api/              # API route handlers
+│   ├── dashboard/        # Protected dashboard (main UI)
+│   ├── login/            # Magic link authentication
+│   ├── confirm/[token]/  # Public client confirmation page
+│   └── components/       # Shared React components
+├── lib/                  # Utilities and helpers
+```
+
+Root also contains deprecated static files (`index.html`, `styles.css`, `script.js`) — these should be deleted as landing page is now in Next.js.
+
+### Key Libraries
+
+- `lib/supabase.ts` / `lib/supabaseAdmin.ts` - Client vs admin Supabase instances
+- `lib/googleAuth.ts` - OAuth2 client with stored tokens
+- `lib/noShowRules.ts` - Resolves global + per-appointment rule overrides
+- `lib/contactParser.ts` - Extracts email/phone from event text
+- `lib/useUser.ts` - React hook for auth state
+- `lib/plans.ts` - Plan configuration (Starter/Pro/Business)
+- `lib/types.ts` - Shared TypeScript types
+
+### Database Tables (Supabase)
+
+- `profiles` - User accounts and plan selection
+- `google_connections` - OAuth tokens
+- `calendar_bookings` - Synced appointments
+- `booking_confirmations` - Confirmation tokens and status
+- `no_show_settings` - Global rules per user
+- `appointment_no_show_overrides` - Per-event rule overrides
+
+---
+
+## 6. Plans & Pricing
+
+### Starter (Free)
+- Max 30 protected appointments per month
+- Email confirmations only
+- Automatic confirmation after draft window
+- No auto-resend
+- Limited settings
+- Upgrade CTA visible everywhere
+
+### Pro (€39 / $39 per month)
+- Unlimited appointments
+- Email + SMS confirmations
+- Auto-resend available
+- Per-appointment protection rules
+- Priority UX / visual polish
+
+### Business
+- Not available yet
+- Code should anticipate it without exposing UI
+
+### Pricing Rules
+- EU countries → EUR
+- Rest of world → USD
+- Numeric price stays the same (39)
+
+---
+
+## 7. Stripe Rules (NON-NEGOTIABLE)
+
+Stripe is used for:
+- Pro subscriptions
+- Card authorization during confirmation
+
+**Critical flow:**
+1. Client authorizes card when confirming booking
+2. No money is charged at confirmation
+3. Charge happens **only** if:
+   - Event has started AND
+   - Business clicks "Mark no-show"
+4. "Mark attended" → no charge
+5. "Confirmation expired" → no charge
+
+**This must never be violated.**
+
+---
+
+## 8. Event & Booking Lifecycle
+
+### Statuses
+
+**Confirmation**: `draft` → `pending` → `confirmed` | `expired`
+**Attendance**: `pending` → `attended` | `no_show`
+
+### Event Ingestion
+- Events pulled from connected calendar
+- Email/phone may appear in event title or description
+- System must:
+  - Detect email/phone (improve contact parsing)
+  - Strip contact from displayed title
+  - Store contact separately
+  - Show contact clearly in dashboard
+
+### Draft Phase
+- New event → Draft
+- Draft window = configurable minutes
+- During draft:
+  - User can edit protection rules
+  - Confirmation is NOT sent yet
+
+### Confirmation
+- After draft expires:
+  - Starter → auto-send once
+  - Pro → auto-send + optional auto-resend
+- Manual "Send confirmation" allowed when applicable
+
+### Confirmation Message Must Include:
+- Event info
+- No-show fee
+- Cancellation window
+- Clear statement: "Card is authorized, not charged"
+- Stripe authorization link (card / Apple Pay / etc.)
+
+---
+
+## 9. Dashboard Logic
+
+### Event Cards
+
+**Future events** (Draft / Pending / Confirmed):
+- Show relevant buttons only
+
+**Past events**:
+- No buttons
+- Show final status only: Attended | No-Show applied | Confirmation expired
+
+### Buttons (Strict Rules)
+- "Send confirmation"
+- "Send reminder"
+- "Mark attended"
+- "Mark no-show"
+
+Buttons must enable/disable based on time, plan, and status. Never allow illegal actions.
+
+### Protection Visibility
+
+Always show: Fee, Grace period, Late cancellation window
+
+- **Starter**: Global only
+- **Pro**: Per-event editable
+
+---
+
+## 10. Monthly Limit (Starter)
+
+- Starter limited to 30 protected appointments per calendar month
+- When limit reached:
+  - No confirmations are sent
+  - UI shows: "Protection not applied — monthly limit reached"
+- Dashboard counter: "Protection used this month: X / 30"
+- At 25/30: Send upgrade encouragement email
+- Starter dashboard includes Upgrade to Pro CTA
+
+---
+
+## 11. Calendar Integrations
+
+### Required (now)
+- Google Calendar (already implemented)
+
+### Designed for future
+- Apple Calendar
+- Microsoft Outlook Calendar
+
+Architecture must be provider-agnostic — allow new calendars without refactoring core booking logic.
+
+---
+
+## 12. Authentication & Security
+
+- Supabase authentication (magic links / OAuth)
+- Strong row-level security
+- Never trust client input
+- All critical logic server-side
+- High security by default
+
+---
+
+## 13. Email System
+
+### Required Emails
+- Welcome email (different copy for Starter vs Pro)
+- Usage warning email (at 25/30)
+- Confirmation emails
+- Reminder emails (if allowed by plan)
+
+### Email Requirements
+- Feel premium
+- Be legally safe
+- Be very clear
+
+---
+
+## 14. Landing Page (Redesigned 2026-02-01)
+
+Premium DataPulse-inspired design with animated charts and extended content.
+
+### Header (Glassmorphism Design)
+- Floating glassmorphism style with backdrop blur and subtle indigo border
+- Logo with "Attenda" text in brand indigo color on the left
+- Centered navigation: Features, Blog, Pricing
+- Right side: Theme toggle, Sign In link, "Start Free Trial" button
+- Mobile: Hamburger menu with slide-in panel containing:
+  - Logo + theme toggle + close button in header
+  - Navigation links (Features, Pricing, Blog)
+  - Sign In and Start Free Trial buttons at bottom
+
+### Cookie Consent
+- Minimal Vercel-style notification at bottom center
+- Appears after 1.5s delay for better UX
+- Glassmorphism card with "Accept" (indigo) and "Decline" buttons
+- Links to Privacy Policy
+- Saves preference to localStorage
+- Responsive: horizontal on desktop, stacked on mobile
+- Component: `app/(landing)/components/CookieConsent.tsx`
+
+### Sections (in order)
+1. **Header** - Floating glassmorphism nav with centered links
+2. **Hero** - Split layout: text left (badge, gradient heading, CTAs, stats), animated revenue chart right with floating metrics
+3. **How It Works** - 4-step numbered flow (Connect → Protection → Confirm → Protected)
+4. **Features** - 6-card grid with icons (Calendar Sync, Auto Confirmations, Protection, Payments, Reminders, Rules)
+5. **Dashboard Preview** - Analytics mockup with metrics and charts
+6. **Use Cases** - 4 cards (Salons, Medical, Consultants, Restaurants)
+7. **Social Proof** - Animated counters + company logos
+8. **Pricing** - 3-tier cards (Starter/Pro/Business)
+9. **FAQ** - 7-question accordion
+10. **Testimonials** - 3 customer quotes with avatars
+11. **Trust Badges** - Stripe, GDPR, Uptime, Setup
+12. **Final CTA** - Dark section with gradient background
+13. **Footer** - 5-column layout (Brand, Product, Company, Resources, Legal)
+
+### Key Components
+- `app/(landing)/components/Header.tsx` - Glassmorphism floating header with centered nav
+- `app/(landing)/components/MobileMenu.tsx` - Slide-in mobile menu with CTAs
+- `app/(landing)/components/ThemeToggle.tsx` - Light/dark mode toggle
+- `app/(landing)/components/CookieConsent.tsx` - Minimal cookie notification
+- `app/(landing)/components/Hero.tsx` - Animated canvas chart showing revenue impact
+- `app/(landing)/components/HowItWorks.tsx` - Step-by-step flow
+- `app/(landing)/components/Features.tsx` - Feature grid with SVG icons
+- `app/(landing)/components/DashboardPreview.tsx` - Analytics mockup with mini charts
+- `app/(landing)/components/UseCases.tsx` - Business type cards
+- `app/(landing)/components/FAQ.tsx` - Collapsible accordion
+- `app/(landing)/components/Testimonials.tsx` - Customer quotes
+- `app/(landing)/components/TrustBadges.tsx` - Security/trust indicators
+- `app/(landing)/components/FinalCTA.tsx` - Dark CTA section
+
+---
+
+## 15. Social Proof & Marketing
+
+Located after Use Cases section on landing page:
+- Animated counters with intersection observer (animate on scroll into view)
+- Current metrics displayed:
+  - "2,954+ Protections Applied"
+  - "€88,462 Revenue Recovered"
+  - "94% Show-up Rate"
+- Company logos section ("Trusted by service professionals at...")
+- Placeholder company names: Salon Pro, MediBook, CoachHub, BookSmart, WellnessApp
+
+---
+
+## 16. Blog & SEO (Complete 2026-02-01)
+
+### Blog Articles (5 SEO-optimized articles)
+1. **The True Cost of No-Shows** (`/blog/true-cost-of-no-shows`)
+   - Financial impact analysis with cost breakdown chart
+   - Industry statistics on no-show rates
+
+2. **Why Clients Don't Show Up** (`/blog/why-clients-dont-show-up`)
+   - Psychology of no-shows with commitment spectrum visualization
+   - Understanding client behavior patterns
+
+3. **5 Strategies to Reduce No-Shows** (`/blog/5-strategies-reduce-no-shows`)
+   - Actionable strategies with impact comparison chart
+   - Best practices for appointment management
+
+4. **The Card Authorization Solution** (`/blog/card-authorization-solution`)
+   - Hotel model explanation with step-by-step flow diagram
+   - How card authorization works without charging
+
+5. **No-Show Policy Best Practices** (`/blog/no-show-policy-best-practices`)
+   - Policy templates with effectiveness metrics
+   - Legal and communication guidelines
+
+### Blog Features
+- SEO metadata on each article (title, description, keywords, OpenGraph)
+- Professional SVG illustrations and charts
+- Responsive design matching landing page aesthetic
+- "Back to Blog" navigation
+- CTA sections linking to sign-up
+- Blog index page at `/blog` with article cards
+
+### Structure
+- Blog link: Header nav (desktop), Hamburger menu (mobile), Footer
+- Clean URLs with descriptive slugs
+- Meta tags and accessibility best practices
+
+---
+
+## 17. UI/UX Rules
+
+- Premium, minimal, calm
+- No clutter
+- Starter feels complete but limited
+- Pro feels clearly more powerful
+- Visual affordances for Pro-only features
+
+---
+
+## 18. Environment Variables
+
+Required in `.env.local`:
+- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
+- `RESEND_API_KEY`
+- `SMS_PROVIDER` (currently "mock")
+- Stripe keys (for subscriptions and authorization)
+
+---
+
+## 19. Implementation Status (Updated 2026-02-01)
+
+### ✅ Complete (Working in Production)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Authentication | 100% | Magic links via Supabase |
+| **Landing Page** | 100% | Full redesign with animated charts, 13 sections |
+| **Header** | 100% | Glassmorphism floating nav, centered links, mobile menu |
+| **Blog Section** | 100% | 5 SEO articles with illustrations |
+| **Cookie Consent** | 100% | Minimal Vercel-style notification |
+| Google Calendar Integration | 95% | OAuth2, event sync, contact extraction |
+| Booking Management | 95% | Draft → Pending → Confirmed flow |
+| No-Show Rules (Global) | 95% | Settings page working |
+| Monthly Limits (Starter) | 90% | Counter, limits enforced |
+| Plan System | 85% | Starter/Pro tiers defined |
+| Dashboard | 80% | Event cards, filtering, status display |
+| Email Confirmations | 85% | Via Resend, basic templates |
+| Social Proof Counters | 100% | Animated counters with company logos |
+
+### ⚠️ Partial (Needs Work)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| No-Show Rules (Per-Event) | 60% | API exists, modal UI incomplete |
+| Settings Page | 40% | Mostly placeholder |
+| SMS Capability | 30% | Mock provider only |
+
+### ❌ Not Started (Critical Gaps)
+
+| Feature | Priority | Notes |
+|---------|----------|-------|
+| **Stripe Subscriptions** | 🔴 CRITICAL | Cannot process payments |
+| **Stripe Card Authorization** | 🔴 CRITICAL | Confirmation page missing Stripe UI |
+| **Stripe Charging** | 🔴 CRITICAL | Cannot charge for no-shows |
+| Premium Email Templates | 🟡 HIGH | Welcome, warning, reminder emails |
+| SMS Provider Connection | 🟠 MEDIUM | Twilio/Telnyx integration |
+| Multi-Calendar Support | 🟠 MEDIUM | Flags exist, no implementation |
+| Apple/Outlook Calendar | 🟠 MEDIUM | OAuth designed, not built |
+| Currency Handling (EUR/USD) | 🔵 LOW | Only EUR currently |
+
+---
+
+## 20. Prioritized Next Steps
+
+### Phase 1: Payment System (BLOCKING - Must Complete First)
+
+Without Stripe, the product cannot generate revenue or fulfill its core promise.
+
+1. **Add Stripe SDK** - `npm install stripe @stripe/stripe-js @stripe/react-stripe-js`
+2. **Environment variables** - Add `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`
+3. **Stripe customer creation** - Create Stripe customer when user signs up
+4. **Subscription checkout** - Implement Pro plan subscription flow
+5. **Confirmation page Stripe UI** - Add card authorization during confirmation
+6. **Charge on no-show** - Implement payment capture when business marks no-show
+7. **Webhook handlers** - Handle subscription events, payment failures
+
+### Phase 2: Core Experience Polish
+
+1. **Complete AppointmentOverrideModal** - Per-event protection editing for Pro users
+2. **Complete Settings page** - Plan upgrade, account settings
+3. **Premium email templates** - Styled confirmation, welcome, warning emails
+4. **SMS provider integration** - Connect Twilio or Telnyx
+
+### Phase 3: Marketing & Growth
+
+1. ~~**Blog section**~~ ✅ Complete - 5 SEO articles with illustrations
+2. ~~**Social proof counters**~~ ✅ Complete - Animated counters implemented
+3. ~~**Landing page redesign**~~ ✅ Complete - Full DataPulse-style redesign
+4. ~~**Header redesign**~~ ✅ Complete - Glassmorphism floating nav
+5. ~~**Cookie consent**~~ ✅ Complete - Minimal Vercel-style notification
+6. **Delete deprecated files** - Remove root `index.html`, `styles.css`, `script.js`
+
+### Phase 4: Future Features
+
+1. **Multi-calendar support** - Multiple Google calendars per user
+2. **Apple Calendar integration** - OAuth + CalDAV
+3. **Outlook Calendar integration** - Microsoft Graph API
+4. **Currency handling** - EUR for EU, USD for rest of world
+
+---
+
+## 21. Database Tables (Complete Reference)
+
+Current tables in use:
+
+| Table | Purpose |
+|-------|---------|
+| `profiles` | User accounts, plan, auto-resend setting |
+| `google_connections` | OAuth tokens per user |
+| `calendar_bookings` | Synced events from calendar |
+| `booking_confirmations` | Confirmation tokens, status, channel |
+| `no_show_settings` | Global rules per user |
+| `appointment_no_show_overrides` | Per-event rule overrides |
+| `appointment_attendance` | Attendance records (attended/no_show) |
+
+**Needed for Stripe:**
+| Table | Purpose |
+|-------|---------|
+| `stripe_customers` | Map user_id → Stripe customer_id |
+| `subscriptions` | Track active subscriptions |
+| `payment_intents` | Track card authorizations and charges |
+
+---
+
+## 22. Goal
+
+Building a real SaaS with real money and real customers.
+
+**Optimize for:**
+- Trust
+- Correctness
+- Security
+- Long-term maintainability
+- Premium perception
+
+---
+
+## 23. Critical Reminders
+
+- **Stripe is the #1 priority** — the product cannot function without it
+- Landing page complete (2026-02-01) — glassmorphism header, 13 sections, indigo/teal color scheme
+- Blog complete (2026-02-01) — 5 SEO-optimized articles with professional illustrations
+- Cookie consent implemented — minimal Vercel-style notification with localStorage persistence
+- Static files at root (`index.html`, `styles.css`, `script.js`) are deprecated — delete when convenient
+- Database has some inconsistent table naming (`appointment_attendance` vs `attendance_records`) — consolidate during cleanup
+- Never bypass the "manual no-show confirmation" rule — it's legally and ethically critical
