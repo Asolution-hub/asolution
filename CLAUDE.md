@@ -18,7 +18,8 @@ This file provides guidance to Claude Code when working with this repository.
 
 **Attenda** is a premium SaaS tool that helps service businesses reduce no-show appointments.
 
-- **Domain**: Attenda.io
+- **Domain**: attenda.app (live on Vercel)
+- **GitHub**: github.com/Asolution-hub/attenda
 - **This is a real, paid product** — assume real users, real money, legal implications, and long-term maintenance
 - Landing page + Dashboard live in one Next.js project
 - Both share the same design language, UI components, and UX quality
@@ -92,9 +93,13 @@ Root also contains deprecated static files (`index.html`, `styles.css`, `script.
 ### Key Libraries
 
 - `lib/supabase.ts` / `lib/supabaseAdmin.ts` - Client vs admin Supabase instances
-- `lib/googleAuth.ts` - OAuth2 client with stored tokens
+- `lib/auth.ts` - Authentication helpers (verifyUserAccess, verifyCronSecret, verifyInternalSecret, verifyOrigin)
+- `lib/validation.ts` - Input validation, rate limiting, IP extraction
+- `lib/encryption.ts` - AES-256-GCM token encryption for OAuth tokens
+- `lib/googleAuth.ts` - OAuth2 client with encrypted token storage
 - `lib/noShowRules.ts` - Resolves global + per-appointment rule overrides
 - `lib/contactParser.ts` - Extracts email/phone from event text
+- `lib/email.ts` - Email sending via Resend
 - `lib/useUser.ts` - React hook for auth state
 - `lib/plans.ts` - Plan configuration (Starter/Pro/Business)
 - `lib/types.ts` - Shared TypeScript types
@@ -250,11 +255,42 @@ Architecture must be provider-agnostic — allow new calendars without refactori
 
 ## 12. Authentication & Security
 
-- Supabase authentication (magic links / OAuth)
-- Strong row-level security
+### Authentication
+- Supabase authentication (magic links)
+- Google OAuth for calendar integration
+- Session management via Supabase cookies
+
+### Security Architecture (Implemented 2026-02-03)
+
+**API Route Protection:**
+- All routes use `verifyUserAccess()` from `lib/auth.ts`
+- UUID validation on all user/resource IDs
+- Rate limiting on all endpoints via `checkRateLimit()`
+- Ownership verification on all resource access
+
+**Token Security:**
+- OAuth tokens encrypted with AES-256-GCM (`lib/encryption.ts`)
+- Cron jobs authenticated via `verifyCronSecret()`
+- Internal API calls authenticated via `verifyInternalSecret()`
+- CSRF protection via `verifyOrigin()`
+
+**Headers & CSP:**
+- Security headers applied in `middleware.ts`
+- Strict CSP (no unsafe-eval)
+- HSTS enabled in production
+- X-Frame-Options: DENY
+
+**Key Security Files:**
+- `lib/auth.ts` - All authentication/authorization helpers
+- `lib/validation.ts` - Input validation, rate limiting, IP extraction
+- `lib/encryption.ts` - Token encryption utilities
+- `middleware.ts` - Security headers, CSP
+
+### Security Rules
 - Never trust client input
 - All critical logic server-side
 - High security by default
+- All secrets via environment variables (never NEXT_PUBLIC_)
 
 ---
 
@@ -391,34 +427,74 @@ Located after Use Cases section on landing page:
 
 ## 18. Environment Variables
 
-Required in `.env.local`:
-- `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
+Required in `.env.local` (all configured in Vercel):
+
+**Supabase:**
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+**Google OAuth:**
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI` (https://attenda.app/api/google/callback)
+
+**Email/SMS:**
 - `RESEND_API_KEY`
+- `EMAIL_FROM`
 - `SMS_PROVIDER` (currently "mock")
-- Stripe keys (for subscriptions and authorization)
+- `SMS_FROM`
+
+**Security:**
+- `CRON_SECRET` - For cron job authentication
+- `OAUTH_STATE_SECRET` - For OAuth CSRF protection
+- `INTERNAL_API_SECRET` - For server-to-server API calls
+- `TOKEN_ENCRYPTION_KEY` - 64 hex chars for AES-256-GCM OAuth token encryption
+
+**App:**
+- `NEXT_PUBLIC_APP_URL` (https://attenda.app)
+
+**Needed for Stripe (NOT YET CONFIGURED):**
+- `STRIPE_SECRET_KEY`
+- `STRIPE_PUBLISHABLE_KEY`
+- `STRIPE_WEBHOOK_SECRET`
 
 ---
 
-## 19. Implementation Status (Updated 2026-02-01)
+## 19. Implementation Status (Updated 2026-02-03)
 
 ### ✅ Complete (Working in Production)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
+| **Deployed to Vercel** | 100% | Live at attenda.app |
 | Authentication | 100% | Magic links via Supabase |
+| **Security Hardening** | 100% | Full audit completed, all issues fixed |
 | **Landing Page** | 100% | Full redesign with animated charts, 13 sections |
 | **Header** | 100% | Glassmorphism floating nav, centered links, mobile menu |
-| **Blog Section** | 100% | 5 SEO articles with illustrations |
+| **Blog Section** | 100% | 9 SEO articles with illustrations |
 | **Cookie Consent** | 100% | Minimal Vercel-style notification |
-| Google Calendar Integration | 95% | OAuth2, event sync, contact extraction |
+| Google Calendar Integration | 95% | OAuth2, event sync, encrypted token storage |
 | Booking Management | 95% | Draft → Pending → Confirmed flow |
 | No-Show Rules (Global) | 95% | Settings page working |
 | Monthly Limits (Starter) | 90% | Counter, limits enforced |
 | Plan System | 85% | Starter/Pro tiers defined |
-| Dashboard | 80% | Event cards, filtering, status display |
+| Dashboard | 85% | Event cards, filtering, status display |
 | Email Confirmations | 85% | Via Resend, basic templates |
 | Social Proof Counters | 100% | Animated counters with company logos |
+
+### 🔒 Security Features (Implemented 2026-02-03)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| API Authentication | ✅ | All routes use verifyUserAccess() |
+| OAuth Token Encryption | ✅ | AES-256-GCM via lib/encryption.ts |
+| Internal API Secret | ✅ | Server-to-server calls authenticated |
+| CSRF Protection | ✅ | Origin verification in lib/auth.ts |
+| Rate Limiting | ✅ | All endpoints protected (in-memory) |
+| Input Validation | ✅ | UUID validation, sanitization |
+| CSP Headers | ✅ | Strict policy in middleware.ts |
+| Timing-Safe Comparisons | ✅ | All secret comparisons |
 
 ### ⚠️ Partial (Needs Work)
 
@@ -427,6 +503,7 @@ Required in `.env.local`:
 | No-Show Rules (Per-Event) | 60% | API exists, modal UI incomplete |
 | Settings Page | 40% | Mostly placeholder |
 | SMS Capability | 30% | Mock provider only |
+| Distributed Rate Limiting | 0% | Needs Redis/Upstash for production scale |
 
 ### ❌ Not Started (Critical Gaps)
 
@@ -521,9 +598,13 @@ Building a real SaaS with real money and real customers.
 ## 23. Critical Reminders
 
 - **Stripe is the #1 priority** — the product cannot function without it
+- **Site is LIVE** at https://attenda.app — deployed on Vercel
+- **Security audit completed** (2026-02-03) — all vulnerabilities fixed
+- OAuth tokens are now encrypted with AES-256-GCM
 - Landing page complete (2026-02-01) — glassmorphism header, 13 sections, indigo/teal color scheme
-- Blog complete (2026-02-01) — 5 SEO-optimized articles with professional illustrations
+- Blog complete (2026-02-01) — 9 SEO-optimized articles with professional illustrations
 - Cookie consent implemented — minimal Vercel-style notification with localStorage persistence
 - Static files at root (`index.html`, `styles.css`, `script.js`) are deprecated — delete when convenient
 - Database has some inconsistent table naming (`appointment_attendance` vs `attendance_records`) — consolidate during cleanup
 - Never bypass the "manual no-show confirmation" rule — it's legally and ethically critical
+- For production scale: implement Redis-based rate limiting (currently in-memory)
