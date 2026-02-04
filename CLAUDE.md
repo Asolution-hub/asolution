@@ -88,8 +88,6 @@ App/attenda/
 ├── lib/                  # Utilities and helpers
 ```
 
-Root also contains deprecated static files (`index.html`, `styles.css`, `script.js`) — these should be deleted as landing page is now in Next.js.
-
 ### Key Libraries
 
 - `lib/supabase.ts` / `lib/supabaseAdmin.ts` - Client vs admin Supabase instances
@@ -256,9 +254,13 @@ Architecture must be provider-agnostic — allow new calendars without refactori
 ## 12. Authentication & Security
 
 ### Authentication
-- Supabase authentication (magic links)
-- Google OAuth for calendar integration
+- Supabase authentication (magic links + Google OAuth login)
+- Google OAuth for calendar integration (separate from login)
 - Session management via Supabase cookies
+
+**Note:** Google OAuth is used in two places:
+1. **Login** - Via Supabase Auth (configured in Supabase dashboard)
+2. **Calendar** - Direct OAuth2 for Google Calendar API access
 
 ### Security Architecture (Implemented 2026-02-03)
 
@@ -454,6 +456,12 @@ Required in `.env.local` (all configured in Vercel):
 **App:**
 - `NEXT_PUBLIC_APP_URL` (https://attenda.app)
 
+**⚠️ IMPORTANT: Vercel Environment Variable Gotcha**
+When pasting values into Vercel environment variables, invisible newline characters often get included at the end. This causes cryptic errors like `invalid_client` or validation failures. Always:
+1. After pasting, press **End** then **Backspace** to remove trailing newlines
+2. Or delete and re-type the value manually
+3. Check the debug endpoint `/api/debug/google-config` to verify no newlines
+
 **Needed for Stripe (NOT YET CONFIGURED):**
 - `STRIPE_SECRET_KEY`
 - `STRIPE_PUBLISHABLE_KEY`
@@ -461,27 +469,32 @@ Required in `.env.local` (all configured in Vercel):
 
 ---
 
-## 19. Implementation Status (Updated 2026-02-03)
+## 19. Implementation Status (Updated 2026-02-04)
 
 ### ✅ Complete (Working in Production)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | **Deployed to Vercel** | 100% | Live at attenda.app |
-| Authentication | 100% | Magic links via Supabase |
+| **Authentication** | 100% | Magic links + Google OAuth via Supabase |
 | **Security Hardening** | 100% | Full audit completed, all issues fixed |
 | **Landing Page** | 100% | Full redesign with animated charts, 13 sections |
 | **Header** | 100% | Glassmorphism floating nav, centered links, mobile menu |
 | **Blog Section** | 100% | 9 SEO articles with illustrations |
 | **Cookie Consent** | 100% | Minimal Vercel-style notification |
-| Google Calendar Integration | 95% | OAuth2, event sync, encrypted token storage |
+| **Google Calendar Integration** | 100% | OAuth2, event sync, encrypted token storage |
+| **Dashboard** | 100% | Event cards, filtering, Pro/Starter plan display |
+| **Settings Page** | 100% | Plan display, Pro features, no-show rules link |
+| **Optimistic UI** | 100% | No page reloads, instant feedback on actions |
 | Booking Management | 95% | Draft → Pending → Confirmed flow |
 | No-Show Rules (Global) | 95% | Settings page working |
 | Monthly Limits (Starter) | 90% | Counter, limits enforced |
-| Plan System | 85% | Starter/Pro tiers defined |
-| Dashboard | 85% | Event cards, filtering, status display |
+| Plan System | 90% | Starter/Pro tiers working, manual assignment |
 | Email Confirmations | 85% | Via Resend, basic templates |
 | Social Proof Counters | 100% | Animated counters with company logos |
+| **Mobile Touch Targets** | 100% | WCAG 2.5.5 compliant (44px minimum) |
+| **Dark Mode** | 100% | Full support including mobile safe areas |
+| **Accessibility** | 95% | ARIA attributes, status icons, loading states |
 
 ### 🔒 Security Features (Implemented 2026-02-03)
 
@@ -501,9 +514,9 @@ Required in `.env.local` (all configured in Vercel):
 | Feature | Status | Notes |
 |---------|--------|-------|
 | No-Show Rules (Per-Event) | 60% | API exists, modal UI incomplete |
-| Settings Page | 40% | Mostly placeholder |
 | SMS Capability | 30% | Mock provider only |
 | Distributed Rate Limiting | 0% | Needs Redis/Upstash for production scale |
+| Social Proof Values | 0% | Currently showing 0 - needs real data or placeholders |
 
 ### ❌ Not Started (Critical Gaps)
 
@@ -548,7 +561,7 @@ Without Stripe, the product cannot generate revenue or fulfill its core promise.
 3. ~~**Landing page redesign**~~ ✅ Complete - Full DataPulse-style redesign
 4. ~~**Header redesign**~~ ✅ Complete - Glassmorphism floating nav
 5. ~~**Cookie consent**~~ ✅ Complete - Minimal Vercel-style notification
-6. **Delete deprecated files** - Remove root `index.html`, `styles.css`, `script.js`
+6. ~~**Delete deprecated files**~~ ✅ Complete - No deprecated files remain
 
 ### Phase 4: Future Features
 
@@ -601,10 +614,12 @@ Building a real SaaS with real money and real customers.
 - **Site is LIVE** at https://attenda.app — deployed on Vercel
 - **Security audit completed** (2026-02-03) — all vulnerabilities fixed
 - OAuth tokens are now encrypted with AES-256-GCM
+- **Google Calendar OAuth working** (2026-02-04) — login + calendar connection both functional
 - Landing page complete (2026-02-01) — glassmorphism header, 13 sections, indigo/teal color scheme
 - Blog complete (2026-02-01) — 9 SEO-optimized articles with professional illustrations
 - Cookie consent implemented — minimal Vercel-style notification with localStorage persistence
-- Static files at root (`index.html`, `styles.css`, `script.js`) are deprecated — delete when convenient
+- **Database note:** `profiles` table does NOT have an `email` column — get email from `user` object instead
 - Database has some inconsistent table naming (`appointment_attendance` vs `attendance_records`) — consolidate during cleanup
 - Never bypass the "manual no-show confirmation" rule — it's legally and ethically critical
 - For production scale: implement Redis-based rate limiting (currently in-memory)
+- **Vercel env vars:** Always check for trailing newlines when pasting (see Section 18)
