@@ -81,11 +81,16 @@ npm run lint     # ESLint
 App/attenda/
 ├── app/
 │   ├── api/              # API route handlers
+│   │   ├── stripe/       # Stripe endpoints (checkout, webhooks, portal)
+│   │   ├── bookings/     # Booking management
+│   │   └── auth/         # Authentication endpoints
 │   ├── dashboard/        # Protected dashboard (main UI)
 │   ├── login/            # Magic link authentication
-│   ├── confirm/[token]/  # Public client confirmation page
+│   ├── confirm/[token]/  # Public client confirmation page (Stripe Payment Element)
+│   ├── welcome/          # Post-checkout welcome page for new Pro users
 │   └── components/       # Shared React components
 ├── lib/                  # Utilities and helpers
+├── migrations/           # SQL migrations for Supabase
 ```
 
 ### Key Libraries
@@ -102,6 +107,14 @@ App/attenda/
 - `lib/useUser.ts` - React hook for auth state
 - `lib/plans.ts` - Plan configuration (Starter/Pro/Business) with Stripe price IDs
 - `lib/types.ts` - Shared TypeScript types
+
+### Key API Routes (Stripe)
+
+- `app/api/stripe/create-checkout/route.ts` - Pro checkout for logged-in users
+- `app/api/stripe/create-checkout-guest/route.ts` - Pro checkout for new users (no auth)
+- `app/api/stripe/create-authorization/route.ts` - Card authorization for booking confirmation
+- `app/api/stripe/customer-portal/route.ts` - Stripe billing portal redirect
+- `app/api/stripe/webhook/route.ts` - Handles all Stripe webhook events
 
 ### Database Tables (Supabase)
 
@@ -588,12 +601,21 @@ When pasting values into Vercel environment variables, invisible newline charact
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Pro Subscriptions | ✅ | Stripe Checkout for €39/month subscription |
+| Guest Checkout | ✅ | New users can buy Pro directly from landing page (no login required) |
 | Customer Portal | ✅ | Manage subscription via Stripe portal |
 | Card Authorization | ✅ | PaymentIntent with manual capture on confirmation |
 | No-Show Charging | ✅ | Captures authorized amount on "Mark no-show" |
 | Authorization Release | ✅ | Voids authorization on "Mark attended" |
-| Webhook Handlers | ✅ | Handles subscription and payment events |
+| Webhook Handlers | ✅ | Handles subscription, checkout, and payment events |
+| Auto Account Creation | ✅ | Webhook creates user account after guest checkout via Supabase invite |
 | Stripe Charges Audit | ✅ | All Stripe operations logged to stripe_charges table |
+
+**Pro Signup Flows:**
+
+| From | Flow |
+|------|------|
+| Landing page (new user) | Get Pro → Stripe Checkout → `/welcome` page → Magic link email → Dashboard |
+| Dashboard (existing user) | Upgrade to Pro → Stripe Checkout → Settings page with success message |
 
 ### 🔒 Security Features (Updated 2026-02-05)
 
@@ -733,3 +755,4 @@ Building a real SaaS with real money and real customers.
 - For production scale: implement Redis-based rate limiting (currently in-memory)
 - **Vercel env vars:** Always check for trailing newlines when pasting (see Section 18)
 - **Stripe env vars required:** `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`
+- **Stripe webhook events required:** `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`, `payment_intent.succeeded`, `payment_intent.canceled`, `charge.captured`
