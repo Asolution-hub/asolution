@@ -167,34 +167,104 @@ Stripe is used for:
 **Confirmation**: `draft` → `pending` → `confirmed` | `expired`
 **Attendance**: `pending` → `attended` | `no_show`
 
-### Event Ingestion
-- Events pulled from connected calendar
-- Email/phone may appear in event title or description
-- System must:
-  - Detect email/phone (improve contact parsing)
-  - Strip contact from displayed title
-  - Store contact separately
-  - Show contact clearly in dashboard
+### Calendar Event Ingestion
 
-### Draft Phase
-- New event → Draft
+For each connected calendar:
+- Fetch upcoming and recent events
+- Each calendar event maps to one internal booking
+
+**Contact Extraction:**
+- Scan both event title AND description
+- Priority: First valid email → use `email` channel; else first valid phone → use `sms` channel
+- Strip contact info from displayed event title
+- Store contact separately as `client_contact`
+- Store channel as `email` | `sms`
+
+**If no contact found:**
+- Event is still shown in dashboard
+- Confirmation actions are disabled
+- UI warning: "No contact found — add email or phone to event"
+
+### Booking States
+
+**Draft:**
+- Booking created from calendar event
+- Confirmation NOT sent yet
 - Draft window = configurable minutes
 - During draft:
-  - User can edit protection rules
-  - Confirmation is NOT sent yet
-
-### Confirmation
+  - Business can edit protection rules (Pro only)
+  - Business can manually send confirmation
 - After draft expires:
   - Starter → auto-send once
   - Pro → auto-send + optional auto-resend
-- Manual "Send confirmation" allowed when applicable
+
+**Pending:**
+- Confirmation has been sent
+- Waiting for customer confirmation
+- Payment authorization may or may not be completed yet
+
+**Confirmed:**
+- Customer confirmed booking
+- Stripe authorization completed
+- Booking is protected
+
+### Protection Rules
+
+Each booking has protection rules:
+- No-show fee (currency minor units)
+- Grace period (minutes)
+- Late cancellation window (hours)
+
+**Starter:** Uses global protection rules only, cannot edit per booking
+**Pro:** Can override protection rules per booking
+**Important:** Overrides are locked once confirmation is sent
+
+### Confirmation Flow
+
+Confirmation may be sent:
+- Automatically (after draft window expires)
+- Manually (via dashboard button)
+
+Sending confirmation:
+- Creates a `booking_confirmation` record
+- Generates a unique token
+- Sends email or SMS based on detected channel
 
 ### Confirmation Message Must Include:
-- Event info
+- Event details
 - No-show fee
 - Cancellation window
-- Clear statement: "Card is authorized, not charged"
-- Stripe authorization link (card / Apple Pay / etc.)
+- Clear statement: "Your card will be authorized, not charged"
+- Stripe authorization link (Card / Apple Pay / Google Pay)
+
+### Stripe Authorization (Customer Side)
+
+When customer clicks confirmation link:
+- Stripe Checkout / Payment Intent is created
+- Authorization only — no funds captured
+- Supported methods: Card, Apple Pay, Google Pay
+
+**If authorization fails:** Booking remains unconfirmed
+
+### Event Day Logic
+
+**Before event start:**
+- No attendance actions allowed
+
+**After event start:**
+
+| Action | Result |
+|--------|--------|
+| Mark attended | Booking finalized as attended, authorization released, no charge |
+| Mark no-show | No-show fee captured via Stripe, booking finalized as no-show, receipt sent |
+
+**Only manual action can trigger a charge.**
+
+### Past Events
+
+For past events:
+- No action buttons shown
+- Only final state displayed: Attended | No-Show applied | Confirmation expired
 
 ---
 
@@ -204,16 +274,20 @@ Stripe is used for:
 
 **Future events** (Draft / Pending / Confirmed):
 - Show relevant buttons only
+- "Mark attended" / "Mark no-show" buttons: DISABLED until event start time
 
-**Past events**:
-- No buttons
-- Show final status only: Attended | No-Show applied | Confirmation expired
+**Past events** (event has ended):
+- No action buttons shown
+- Only final state displayed: Attended | No-Show applied | Confirmation expired
 
 ### Buttons (Strict Rules)
-- "Send confirmation"
-- "Send reminder"
-- "Mark attended"
-- "Mark no-show"
+
+| Button | When Enabled |
+|--------|--------------|
+| Send confirmation | Draft state, contact exists, within limits |
+| Send reminder | Pending/Confirmed, Pro plan, before event start |
+| Mark attended | After event start, confirmed booking |
+| Mark no-show | After event start, confirmed booking with authorization |
 
 Buttons must enable/disable based on time, plan, and status. Never allow illegal actions.
 
@@ -293,6 +367,16 @@ Architecture must be provider-agnostic — allow new calendars without refactori
 - All critical logic server-side
 - High security by default
 - All secrets via environment variables (never NEXT_PUBLIC_)
+- Calendar data must be isolated per user
+
+### Charging Prerequisites (NON-NEGOTIABLE)
+
+No booking may ever be charged without ALL of the following:
+1. Confirmation was sent to customer
+2. Customer completed Stripe authorization
+3. Business manually clicked "Mark no-show"
+
+If any prerequisite is missing, charge MUST fail.
 
 ---
 
@@ -469,7 +553,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 
 ---
 
-## 19. Implementation Status (Updated 2026-02-04)
+## 19. Implementation Status (Updated 2026-02-05)
 
 ### ✅ Complete (Working in Production)
 
@@ -496,7 +580,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 | **Dark Mode** | 100% | Full support including mobile safe areas |
 | **Accessibility** | 95% | ARIA attributes, status icons, loading states |
 
-### 🔒 Security Features (Implemented 2026-02-03)
+### 🔒 Security Features (Updated 2026-02-05)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
@@ -508,13 +592,16 @@ When pasting values into Vercel environment variables, invisible newline charact
 | Input Validation | ✅ | UUID validation, sanitization |
 | CSP Headers | ✅ | Strict policy in middleware.ts |
 | Timing-Safe Comparisons | ✅ | All secret comparisons |
+| Event Time Validation | ✅ | Cannot mark attendance before event starts |
+| Rule Locking | ✅ | Protection rules locked after confirmation sent |
+| Channel Detection | ✅ | Auto-detect email vs SMS from contact format |
 
 ### ⚠️ Partial (Needs Work)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| No-Show Rules (Per-Event) | 60% | API exists, modal UI incomplete |
-| SMS Capability | 30% | Mock provider only |
+| No-Show Rules (Per-Event) | 70% | API complete with locking, modal UI incomplete |
+| SMS Capability | 40% | Channel detection works, mock provider only |
 | Distributed Rate Limiting | 0% | Needs Redis/Upstash for production scale |
 | Social Proof Values | 0% | Currently showing 0 - needs real data or placeholders |
 
@@ -613,6 +700,7 @@ Building a real SaaS with real money and real customers.
 - **Stripe is the #1 priority** — the product cannot function without it
 - **Site is LIVE** at https://attenda.app — deployed on Vercel
 - **Security audit completed** (2026-02-03) — all vulnerabilities fixed
+- **Calendar protection logic hardened** (2026-02-05) — event time validation, rule locking, channel detection
 - OAuth tokens are now encrypted with AES-256-GCM
 - **Google Calendar OAuth working** (2026-02-04) — login + calendar connection both functional
 - Landing page complete (2026-02-01) — glassmorphism header, 13 sections, indigo/teal color scheme
