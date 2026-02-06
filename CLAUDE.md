@@ -409,9 +409,19 @@ If any prerequisite is missing, charge MUST fail.
 
 ---
 
-## 14. Landing Page (Redesigned 2026-02-01)
+## 14. Landing Page (Redesigned 2026-02-01, Animations 2026-02-06)
 
 Premium DataPulse-inspired design with animated charts and extended content.
+
+### Framer Motion Animations (Added 2026-02-06)
+- **Header nav links** - Animated underline on hover (indigo blue)
+- **Hero buttons** - Subtle scale/lift on hover
+- **Features cards** - Orange hover effect with icon color change and card lift
+- **Use Cases cards** - Orange hover effect matching Features
+- **Trust Badges** - Orange hover with icon wiggle animation
+- **FAQ accordion** - Smooth height animation with AnimatePresence
+- **How It Works** - Step entrance animations with stagger
+- **Accessibility** - `prefers-reduced-motion` support via `usePrefersReducedMotion` hook
 
 ### Header (Glassmorphism Design)
 - Floating glassmorphism style with backdrop blur and subtle indigo border
@@ -568,7 +578,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 
 ---
 
-## 19. Implementation Status (Updated 2026-02-05)
+## 19. Implementation Status (Updated 2026-02-06)
 
 ### ✅ Complete (Working in Production)
 
@@ -582,7 +592,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 | **Blog Section** | 100% | 9 SEO articles with illustrations |
 | **Cookie Consent** | 100% | Minimal Vercel-style notification |
 | **Google Calendar Integration** | 100% | OAuth2, event sync, encrypted token storage |
-| **Dashboard** | 100% | Event cards, filtering, Pro/Starter plan display |
+| **Dashboard** | 90% | Event cards, filtering, upgrade button (see known bugs below) |
 | **Settings Page** | 100% | Plan display, Pro features, subscription management |
 | **Optimistic UI** | 100% | No page reloads, instant feedback on actions |
 | **Stripe Integration** | 100% | Subscriptions, card auth, no-show charging (2026-02-05) |
@@ -634,6 +644,23 @@ When pasting values into Vercel environment variables, invisible newline charact
 | Channel Detection | ✅ | Auto-detect email vs SMS from contact format |
 | Stripe Webhook Verification | ✅ | Signature verification on all webhooks |
 
+### 🐛 Known Dashboard Bugs (Identified 2026-02-06)
+
+| Bug | Priority | Description |
+|-----|----------|-------------|
+| 5-second login timeout | 🔴 CRITICAL | Users kicked out if dashboard loads >5s (too aggressive) |
+| Hardcoded protection values | 🔴 HIGH | All events show €30/10min/24h instead of user settings |
+| Dark mode status badges | 🟡 MEDIUM | Poor contrast, colors don't adapt to dark mode |
+| Resend label calculation | 🟡 MEDIUM | Shows incorrect "Resend available in X" messages |
+| Optimistic UI no rollback | 🟡 MEDIUM | UI shows wrong state if API fails |
+| Missing ARIA live regions | 🟡 MEDIUM | Screen readers don't announce status changes |
+| Touch targets too small | 🟡 MEDIUM | Some mobile buttons below 44px minimum |
+
+**Files affected:**
+- `app/dashboard/page.tsx` - timeout logic (line 238), protection values (line 650)
+- `app/dashboard/components/EventCard.tsx` - resend label calculation (line 186)
+- `app/globals.css` - status badge dark mode styles (line 3009)
+
 ### ⚠️ Partial (Needs Work)
 
 | Feature | Status | Notes |
@@ -641,6 +668,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 | No-Show Rules (Per-Event) | 70% | API complete with locking, modal UI incomplete |
 | SMS Capability | 40% | Channel detection works, mock provider only |
 | Distributed Rate Limiting | 0% | Needs Redis/Upstash for production scale |
+| Dashboard Bug Fixes | 0% | See known bugs section above |
 
 ### ❌ Not Started
 
@@ -668,13 +696,21 @@ Stripe integration is fully implemented:
 - ✅ Webhook handlers for all events
 - ✅ Customer portal for subscription management
 
-### Phase 2: Core Experience Polish (Current Priority)
+### Phase 2: Dashboard Bug Fixes (Current Priority)
+
+1. **Fix 5-second timeout** - Increase to 30s or remove entirely, rely on proper error handling
+2. **Load real protection values** - Fetch from database instead of hardcoded €30/10min/24h
+3. **Fix dark mode status badges** - Add CSS variables for dark mode contrast
+4. **Fix resend label calculation** - Base on lastSentAt, not current time modulo
+
+### Phase 3: Core Experience Polish
 
 1. **Complete AppointmentOverrideModal** - Per-event protection editing for Pro users
 2. **Premium email templates** - Styled confirmation, welcome, warning emails
 3. **SMS provider integration** - Connect Twilio or Telnyx
+4. **Add ARIA live regions** - Announce status changes to screen readers
 
-### Phase 3: Marketing & Growth
+### Phase 4: Marketing & Growth (Mostly Complete)
 
 1. ~~**Blog section**~~ ✅ Complete - 9 SEO articles with illustrations
 2. ~~**Social proof counters**~~ ✅ Complete - Animated counters implemented
@@ -682,8 +718,9 @@ Stripe integration is fully implemented:
 4. ~~**Header redesign**~~ ✅ Complete - Glassmorphism floating nav
 5. ~~**Cookie consent**~~ ✅ Complete - Minimal Vercel-style notification
 6. ~~**Stripe integration**~~ ✅ Complete - Full payment system
+7. ~~**Framer Motion animations**~~ ✅ Complete - Smooth hover effects, FAQ accordion
 
-### Phase 4: Future Features
+### Phase 5: Future Features
 
 1. **Multi-calendar support** - Multiple Google calendars per user
 2. **Apple Calendar integration** - OAuth + CalDAV
@@ -740,6 +777,9 @@ Building a real SaaS with real money and real customers.
 
 ## 23. Critical Reminders
 
+- **Dashboard bugs identified** (2026-02-06) — see Section 19 for known bugs requiring fixes
+- **Landing page animations added** (2026-02-06) — Framer Motion hover effects, FAQ accordion
+- **Upgrade to Pro button** (2026-02-06) — Added to Starter dashboard header
 - **Stripe integration complete** (2026-02-05) — subscriptions, card auth, and no-show charging all working
 - **Site is LIVE** at https://attenda.app — deployed on Vercel
 - **Security audit completed** (2026-02-03) — all vulnerabilities fixed
