@@ -97,7 +97,7 @@ App/attenda/
 
 - `lib/supabase.ts` / `lib/supabaseAdmin.ts` - Client vs admin Supabase instances
 - `lib/auth.ts` - Authentication helpers (verifyUserAccess, verifyCronSecret, verifyInternalSecret, verifyOrigin)
-- `lib/validation.ts` - Input validation, rate limiting, IP extraction
+- `lib/validation.ts` - Input validation, rate limiting, sanitization, timing protection
 - `lib/encryption.ts` - AES-256-GCM token encryption for OAuth tokens
 - `lib/googleAuth.ts` - OAuth2 client with encrypted token storage
 - `lib/stripe.ts` - Stripe client with helpers (authorization, capture, void, subscriptions)
@@ -350,19 +350,29 @@ Architecture must be provider-agnostic — allow new calendars without refactori
 1. **Login** - Via Supabase Auth (configured in Supabase dashboard)
 2. **Calendar** - Direct OAuth2 for Google Calendar API access
 
-### Security Architecture (Implemented 2026-02-03)
+### Security Architecture (Updated 2026-02-06)
 
 **API Route Protection:**
 - All routes use `verifyUserAccess()` from `lib/auth.ts`
 - UUID validation on all user/resource IDs
 - Rate limiting on all endpoints via `checkRateLimit()`
 - Ownership verification on all resource access
+- CSRF protection via `verifyOrigin()` on state-changing endpoints
 
 **Token Security:**
-- OAuth tokens encrypted with AES-256-GCM (`lib/encryption.ts`)
+- OAuth tokens encrypted with AES-256-GCM (`lib/encryption.ts`) - MANDATORY
 - Cron jobs authenticated via `verifyCronSecret()`
 - Internal API calls authenticated via `verifyInternalSecret()`
-- CSRF protection via `verifyOrigin()`
+- Token enumeration prevented via `constantTimeDelay()`
+
+**Input Sanitization:**
+- `sanitizeString()` - General input sanitization
+- `sanitizeForSMS()` - SMS-specific sanitization (removes Unicode direction overrides, zero-width chars)
+
+**Production Hardening:**
+- Test endpoints return 404 in production
+- `devLog()` suppresses sensitive logging in production
+- Error details not exposed in redirect URLs
 
 **Headers & CSP:**
 - Security headers applied in `middleware.ts`
@@ -371,8 +381,8 @@ Architecture must be provider-agnostic — allow new calendars without refactori
 - X-Frame-Options: DENY
 
 **Key Security Files:**
-- `lib/auth.ts` - All authentication/authorization helpers
-- `lib/validation.ts` - Input validation, rate limiting, IP extraction
+- `lib/auth.ts` - Authentication, authorization, CSRF, OAuth state
+- `lib/validation.ts` - Input validation, rate limiting, sanitization, timing protection
 - `lib/encryption.ts` - Token encryption utilities
 - `middleware.ts` - Security headers, CSP
 
@@ -394,13 +404,43 @@ If any prerequisite is missing, charge MUST fail.
 
 ---
 
-## 13. Email System
+## 13. Email System (Implemented 2026-02-06)
 
-### Required Emails
-- Welcome email (different copy for Starter vs Pro)
-- Usage warning email (at 25/30)
-- Confirmation emails
-- Reminder emails (if allowed by plan)
+### Email Provider
+- **Provider:** Resend (via `RESEND_API_KEY`)
+- **Templates:** React Email (`@react-email/components`)
+- **Location:** `emails/` directory
+
+### Email Templates (6 total)
+
+| Template | File | Triggered By |
+|----------|------|--------------|
+| Booking Confirmation | `BookingConfirmation.tsx` | Dashboard "Send Confirmation" |
+| Booking Reminder | `BookingReminder.tsx` | Cron job (24h before, Pro only) |
+| No-Show Receipt | `NoShowReceipt.tsx` | "Mark no-show" action |
+| Welcome Starter | `WelcomeStarter.tsx` | Free signup |
+| Welcome Pro | `WelcomePro.tsx` | Stripe checkout complete |
+| Usage Warning | `UsageWarning.tsx` | Cron job (at 25/30) |
+
+### Email Functions (`lib/email.ts`)
+
+```typescript
+sendBookingConfirmation({ to, businessName, clientName, ... })
+sendBookingReminder({ to, businessName, hoursUntil, ... })
+sendNoShowReceipt({ to, chargeAmount, last4, cardBrand, ... })
+sendWelcomeEmail({ to, userName, plan: "starter" | "pro" })
+sendUsageWarning({ to, userName, currentUsage, limit })
+```
+
+### Cron Jobs for Email
+
+| Cron | Schedule | Purpose |
+|------|----------|---------|
+| `/api/cron/send-reminders` | Hourly | 24h reminders (Pro only) |
+| `/api/cron/check-usage` | Daily 9am | Usage warnings at 25/30 |
+
+### Test Endpoint
+- `GET /api/test/emails` - Sends all 6 templates to test address (dev only)
 
 ### Email Requirements
 - Feel premium
@@ -600,7 +640,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 | No-Show Rules (Global) | 95% | Settings page working |
 | Monthly Limits (Starter) | 90% | Counter, limits enforced |
 | Plan System | 100% | Starter/Pro via Stripe subscriptions |
-| Email Confirmations | 85% | Via Resend, basic templates |
+| **Email System** | 100% | 6 React Email templates, cron jobs for reminders/warnings |
 | Social Proof Counters | 100% | Animated counters with company logos |
 | **Mobile Touch Targets** | 100% | WCAG 2.5.5 compliant (44px minimum) |
 | **Dark Mode** | 100% | Full support including mobile safe areas |
@@ -627,22 +667,27 @@ When pasting values into Vercel environment variables, invisible newline charact
 | Landing page (new user) | Get Pro → Stripe Checkout → `/welcome` page → Magic link email → Dashboard |
 | Dashboard (existing user) | Upgrade to Pro → Stripe Checkout → Settings page with success message |
 
-### 🔒 Security Features (Updated 2026-02-05)
+### 🔒 Security Features (Updated 2026-02-06)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | API Authentication | ✅ | All routes use verifyUserAccess() |
-| OAuth Token Encryption | ✅ | AES-256-GCM via lib/encryption.ts |
+| OAuth Token Encryption | ✅ | AES-256-GCM mandatory (fails if key missing) |
 | Internal API Secret | ✅ | Server-to-server calls authenticated |
-| CSRF Protection | ✅ | Origin verification in lib/auth.ts |
-| Rate Limiting | ✅ | All endpoints protected (in-memory) |
+| CSRF Protection | ✅ | verifyOrigin() on all state-changing endpoints |
+| Rate Limiting | ✅ | All endpoints protected (in-memory, Redis recommended) |
 | Input Validation | ✅ | UUID validation, sanitization |
+| SMS Injection Prevention | ✅ | sanitizeForSMS() removes control/Unicode chars |
 | CSP Headers | ✅ | Strict policy in middleware.ts |
 | Timing-Safe Comparisons | ✅ | All secret comparisons |
+| Token Enumeration Prevention | ✅ | constantTimeDelay() on token lookups |
 | Event Time Validation | ✅ | Cannot mark attendance before event starts |
 | Rule Locking | ✅ | Protection rules locked after confirmation sent |
 | Channel Detection | ✅ | Auto-detect email vs SMS from contact format |
 | Stripe Webhook Verification | ✅ | Signature verification on all webhooks |
+| Stripe Checkout Auth | ✅ | Mandatory authentication (no bypass) |
+| Test Endpoints Blocked | ✅ | /api/test/* returns 404 in production |
+| Production Logging | ✅ | Sensitive logs suppressed via devLog() |
 
 ### 🐛 Known Dashboard Bugs (Identified 2026-02-06)
 
@@ -674,7 +719,6 @@ When pasting values into Vercel environment variables, invisible newline charact
 
 | Feature | Priority | Notes |
 |---------|----------|-------|
-| Premium Email Templates | 🟡 HIGH | Welcome, warning, reminder emails |
 | SMS Provider Connection | 🟠 MEDIUM | Twilio/Telnyx integration |
 | Multi-Calendar Support | 🟠 MEDIUM | Flags exist, no implementation |
 | Apple/Outlook Calendar | 🟠 MEDIUM | OAuth designed, not built |
@@ -706,7 +750,7 @@ Stripe integration is fully implemented:
 ### Phase 3: Core Experience Polish
 
 1. **Complete AppointmentOverrideModal** - Per-event protection editing for Pro users
-2. **Premium email templates** - Styled confirmation, welcome, warning emails
+2. ~~**Premium email templates**~~ ✅ Complete - 6 React Email templates
 3. **SMS provider integration** - Connect Twilio or Telnyx
 4. **Add ARIA live regions** - Announce status changes to screen readers
 
@@ -777,12 +821,14 @@ Building a real SaaS with real money and real customers.
 
 ## 23. Critical Reminders
 
+- **Security audit completed** (2026-02-06) — 3 high + 5 medium priority issues fixed (see Section 12)
+- **Hero stats removed** (2026-02-06) — Counting numbers removed from hero section
+- **Email system complete** (2026-02-06) — 6 React Email templates, run `migrations/email-system.sql` in Supabase
 - **Dashboard bugs identified** (2026-02-06) — see Section 19 for known bugs requiring fixes
 - **Landing page animations added** (2026-02-06) — Framer Motion hover effects, FAQ accordion
 - **Upgrade to Pro button** (2026-02-06) — Added to Starter dashboard header
 - **Stripe integration complete** (2026-02-05) — subscriptions, card auth, and no-show charging all working
 - **Site is LIVE** at https://attenda.app — deployed on Vercel
-- **Security audit completed** (2026-02-03) — all vulnerabilities fixed
 - **Calendar protection logic hardened** (2026-02-05) — event time validation, rule locking, channel detection
 - OAuth tokens are now encrypted with AES-256-GCM
 - **Google Calendar OAuth working** (2026-02-04) — login + calendar connection both functional
