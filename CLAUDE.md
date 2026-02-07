@@ -97,7 +97,7 @@ App/attenda/
 
 - `lib/supabase.ts` / `lib/supabaseAdmin.ts` - Client vs admin Supabase instances
 - `lib/auth.ts` - Authentication helpers (verifyUserAccess, verifyCronSecret, verifyInternalSecret, verifyOrigin)
-- `lib/validation.ts` - Input validation, rate limiting, sanitization, timing protection
+- `lib/validation.ts` - Input validation (UUID, calendarEventId), rate limiting, sanitization, timing protection
 - `lib/encryption.ts` - AES-256-GCM token encryption for OAuth tokens
 - `lib/googleAuth.ts` - OAuth2 client with encrypted token storage
 - `lib/stripe.ts` - Stripe client with helpers (authorization, capture, void, subscriptions)
@@ -350,20 +350,28 @@ Architecture must be provider-agnostic — allow new calendars without refactori
 1. **Login** - Via Supabase Auth (configured in Supabase dashboard)
 2. **Calendar** - Direct OAuth2 for Google Calendar API access
 
-### Security Architecture (Updated 2026-02-06)
+### Security Architecture (Updated 2026-02-06, Audit #2 Complete)
 
 **API Route Protection:**
 - All routes use `verifyUserAccess()` from `lib/auth.ts`
-- UUID validation on all user/resource IDs
+- UUID validation on all user/resource IDs via `isValidUUID()`
+- Calendar event ID validation via `isValidCalendarEventId()` (alphanumeric + hyphens/underscores/dots, max 1024 chars)
 - Rate limiting on all endpoints via `checkRateLimit()`
 - Ownership verification on all resource access
-- CSRF protection via `verifyOrigin()` on state-changing endpoints
+- CSRF protection via `verifyOrigin()` on ALL state-changing POST endpoints
 
 **Token Security:**
 - OAuth tokens encrypted with AES-256-GCM (`lib/encryption.ts`) - MANDATORY
 - Cron jobs authenticated via `verifyCronSecret()`
 - Internal API calls authenticated via `verifyInternalSecret()`
 - Token enumeration prevented via `constantTimeDelay()`
+- Server-side 24h confirmation token expiration check (not just client-side)
+
+**Payment Security:**
+- PaymentIntent IDs NEVER accepted from client — always read from database
+- Stripe error details not exposed to clients
+- Webhook user lookup is paginated (not full table scan)
+- Auto-resend capped at 3 attempts per booking
 
 **Input Sanitization:**
 - `sanitizeString()` - General input sanitization
@@ -372,7 +380,10 @@ Architecture must be provider-agnostic — allow new calendars without refactori
 **Production Hardening:**
 - Test endpoints return 404 in production
 - `devLog()` suppresses sensitive logging in production
-- Error details not exposed in redirect URLs
+- Error details not exposed in redirect URLs or API responses
+- SMS mock provider returns failure in production (prevents silent delivery failures)
+- Debug data removed from Google status endpoint
+- Cron routes only accept POST (GET handlers removed)
 
 **Headers & CSP:**
 - Security headers applied in `middleware.ts`
@@ -382,7 +393,7 @@ Architecture must be provider-agnostic — allow new calendars without refactori
 
 **Key Security Files:**
 - `lib/auth.ts` - Authentication, authorization, CSRF, OAuth state
-- `lib/validation.ts` - Input validation, rate limiting, sanitization, timing protection
+- `lib/validation.ts` - Input validation, rate limiting, sanitization, timing protection, `isValidCalendarEventId()`
 - `lib/encryption.ts` - Token encryption utilities
 - `middleware.ts` - Security headers, CSP
 
@@ -436,8 +447,10 @@ sendUsageWarning({ to, userName, currentUsage, limit })
 
 | Cron | Schedule | Purpose |
 |------|----------|---------|
-| `/api/cron/send-reminders` | Hourly | 24h reminders (Pro only) |
-| `/api/cron/check-usage` | Daily 9am | Usage warnings at 25/30 |
+| `/api/cron/send-reminders` | Hourly (disabled) | 24h reminders (Pro only) |
+| `/api/cron/check-usage` | Daily 9am (disabled) | Usage warnings at 25/30 |
+
+**Note:** Cron schedules removed from `vercel.json` (2026-02-06) due to Vercel Hobby plan limitations (once/day max). Routes still work via POST with `CRON_SECRET` auth — need external scheduler or Vercel Pro plan to re-enable.
 
 ### Test Endpoint
 - `GET /api/test/emails` - Sends all 6 templates to test address (dev only)
@@ -484,18 +497,17 @@ Premium DataPulse-inspired design with animated charts and extended content.
 
 ### Sections (in order)
 1. **Header** - Floating glassmorphism nav with centered links
-2. **Hero** - Split layout: text left (badge, gradient heading, CTAs, stats), animated revenue chart right with floating metrics
+2. **Hero** - Split layout: text left (badge, gradient heading, CTAs), animated revenue chart right with floating metrics (Show-up Rate, Recovered, No-Show Drop)
 3. **How It Works** - 4-step numbered flow (Connect → Protection → Confirm → Protected)
 4. **Features** - 6-card grid with icons (Calendar Sync, Auto Confirmations, Protection, Payments, Reminders, Rules)
 5. **Dashboard Preview** - Analytics mockup with metrics and charts
 6. **Use Cases** - 4 cards (Salons, Medical, Consultants, Restaurants)
-7. **Social Proof** - Animated counters + company logos
-8. **Pricing** - 3-tier cards (Starter/Pro/Business)
-9. **FAQ** - 7-question accordion
-10. **Testimonials** - 3 customer quotes with avatars
-11. **Trust Badges** - Stripe, GDPR, Uptime, Setup
-12. **Final CTA** - Dark section with gradient background
-13. **Footer** - 5-column layout (Brand, Product, Company, Resources, Legal)
+7. **Pricing** - 3-tier cards (Starter/Pro/Business)
+8. **FAQ** - 7-question accordion with aria-controls
+9. **Testimonials** - 3 customer quotes with avatars
+10. **Trust Badges** - Stripe, GDPR, Uptime, Setup
+11. **Final CTA** - Dark section with gradient background
+12. **Footer** - 5-column layout (Brand, Product, Company, Resources, Legal)
 
 ### Key Components
 - `app/(landing)/components/Header.tsx` - Glassmorphism floating header with centered nav
@@ -516,47 +528,52 @@ Premium DataPulse-inspired design with animated charts and extended content.
 
 ## 15. Social Proof & Marketing
 
-Located after Use Cases section on landing page:
-- Animated counters with intersection observer (animate on scroll into view)
-- Current metrics displayed:
-  - "2,954+ Protections Applied"
-  - "€88,462 Revenue Recovered"
-  - "94% Show-up Rate"
-- Company logos section ("Trusted by service professionals at...")
-- Placeholder company names: Salon Pro, MediBook, CoachHub, BookSmart, WellnessApp
+**Note:** SocialProof counter section was removed from the landing page (2026-02-06) — user found the counter stats unprofessional. The Hero section's floating chart metrics (Show-up Rate, Recovered, No-Show Drop) are separate and were kept.
 
 ---
 
-## 16. Blog & SEO (Complete 2026-02-01)
+## 16. Blog & SEO (Complete 2026-02-07)
 
-### Blog Articles (5 SEO-optimized articles)
-1. **The True Cost of No-Shows** (`/blog/true-cost-of-no-shows`)
-   - Financial impact analysis with cost breakdown chart
-   - Industry statistics on no-show rates
-
-2. **Why Clients Don't Show Up** (`/blog/why-clients-dont-show-up`)
-   - Psychology of no-shows with commitment spectrum visualization
-   - Understanding client behavior patterns
-
-3. **5 Strategies to Reduce No-Shows** (`/blog/5-strategies-reduce-no-shows`)
-   - Actionable strategies with impact comparison chart
-   - Best practices for appointment management
-
-4. **The Card Authorization Solution** (`/blog/card-authorization-solution`)
-   - Hotel model explanation with step-by-step flow diagram
-   - How card authorization works without charging
-
-5. **No-Show Policy Best Practices** (`/blog/no-show-policy-best-practices`)
-   - Policy templates with effectiveness metrics
-   - Legal and communication guidelines
+### Blog Articles (9 SEO-optimized articles)
+1. **The True Cost of No-Shows** (`/blog/true-cost-of-no-shows`) — 2026-01-28
+2. **Why Clients Don't Show Up** (`/blog/why-clients-dont-show-up`) — 2026-01-25
+3. **5 Strategies to Reduce No-Shows** (`/blog/5-strategies-reduce-no-shows`) — 2026-01-22
+4. **The Card Authorization Solution** (`/blog/card-authorization-solution`) — 2026-01-18
+5. **No-Show Policy Best Practices** (`/blog/no-show-policy-best-practices`) — 2026-01-15
+6. **No-Show Statistics 2026** (`/blog/no-show-statistics-2026`) — 2026-02-01
+7. **How to Communicate Your No-Show Policy** (`/blog/communicate-no-show-policy`) — 2026-01-30
+8. **The ROI of No-Show Protection** (`/blog/no-show-protection-roi`) — 2026-01-26
+9. **Automated Reminders vs Manual Follow-ups** (`/blog/automated-reminders-vs-manual`) — 2026-01-20
 
 ### Blog Features
-- SEO metadata on each article (title, description, keywords, OpenGraph)
+- SEO metadata on each article (title, description, keywords, OpenGraph, Twitter)
+- BlogPosting JSON-LD schema on all 9 articles (`app/blog/components/BlogPostingSchema.tsx`)
 - Professional SVG illustrations and charts
 - Responsive design matching landing page aesthetic
-- "Back to Blog" navigation
+- "Back to Blog" navigation + ArticleNavigation component
 - CTA sections linking to sign-up
 - Blog index page at `/blog` with article cards
+
+### SEO Infrastructure (Added 2026-02-07)
+
+| Feature | File | Details |
+|---------|------|---------|
+| Google Search Console | `app/layout.tsx` | Verified via meta tag |
+| Bing Webmaster Tools | — | Submitted via Bing portal |
+| Sitemap | `app/sitemap.ts` | 18 URLs with real publish dates |
+| robots.txt | `public/robots.txt` | Allows all, disallows private routes |
+| llms.txt | `public/llms.txt` | AI search engine summary (ChatGPT, Perplexity, Claude) |
+| OG Images | `app/opengraph-image.tsx` | Dynamic generation for homepage |
+| Twitter Images | `app/twitter-image.tsx` | Dynamic generation for homepage |
+| Blog OG Image | `app/blog/opengraph-image.tsx` | Dynamic generation for blog index |
+| SoftwareApplication Schema | `app/layout.tsx` | JSON-LD with pricing and rating |
+| Organization Schema | `app/layout.tsx` | JSON-LD with name, URL, logo, contact |
+| FAQPage Schema | `app/layout.tsx` | JSON-LD with all 7 FAQ questions |
+| BlogPosting Schema | `app/blog/components/BlogPostingSchema.tsx` | JSON-LD on all 9 articles |
+| Canonical URLs | `app/layout.tsx` | Via `metadataBase` + `alternates.canonical` |
+| OpenGraph Meta | `app/layout.tsx` + all pages | Title, description, type, locale |
+| Twitter Card Meta | `app/layout.tsx` + all pages | `summary_large_image` cards |
+| Robots Meta | `app/layout.tsx` | index/follow with googleBot config |
 
 ### Structure
 - Blog link: Header nav (desktop), Hamburger menu (mobile), Footer
@@ -618,7 +635,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 
 ---
 
-## 19. Implementation Status (Updated 2026-02-06)
+## 19. Implementation Status (Updated 2026-02-07)
 
 ### ✅ Complete (Working in Production)
 
@@ -632,19 +649,20 @@ When pasting values into Vercel environment variables, invisible newline charact
 | **Blog Section** | 100% | 9 SEO articles with illustrations |
 | **Cookie Consent** | 100% | Minimal Vercel-style notification |
 | **Google Calendar Integration** | 100% | OAuth2, event sync, encrypted token storage |
-| **Dashboard** | 90% | Event cards, filtering, upgrade button (see known bugs below) |
+| **Dashboard** | 95% | Event cards, filtering, upgrade button, all bugs fixed |
 | **Settings Page** | 100% | Plan display, Pro features, subscription management |
-| **Optimistic UI** | 100% | No page reloads, instant feedback on actions |
+| **Optimistic UI** | 100% | Instant updates, rollback on failure, visible toast notifications |
 | **Stripe Integration** | 100% | Subscriptions, card auth, no-show charging (2026-02-05) |
 | Booking Management | 95% | Draft → Pending → Confirmed flow |
 | No-Show Rules (Global) | 95% | Settings page working |
 | Monthly Limits (Starter) | 90% | Counter, limits enforced |
 | Plan System | 100% | Starter/Pro via Stripe subscriptions |
 | **Email System** | 100% | 6 React Email templates, cron jobs for reminders/warnings |
-| Social Proof Counters | 100% | Animated counters with company logos |
+| ~~Social Proof Counters~~ | REMOVED | Section removed from landing page (2026-02-06) |
 | **Mobile Touch Targets** | 100% | WCAG 2.5.5 compliant (44px minimum) |
 | **Dark Mode** | 100% | Full support including mobile safe areas |
 | **Accessibility** | 95% | ARIA attributes, status icons, loading states |
+| **SEO & Search Indexing** | 100% | Google Search Console, Bing, structured data, OG images, llms.txt |
 
 ### 💳 Stripe Features (Implemented 2026-02-05)
 
@@ -667,16 +685,16 @@ When pasting values into Vercel environment variables, invisible newline charact
 | Landing page (new user) | Get Pro → Stripe Checkout → `/welcome` page → Magic link email → Dashboard |
 | Dashboard (existing user) | Upgrade to Pro → Stripe Checkout → Settings page with success message |
 
-### 🔒 Security Features (Updated 2026-02-06)
+### 🔒 Security Features (Updated 2026-02-06, Audit #2 Complete)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
 | API Authentication | ✅ | All routes use verifyUserAccess() |
 | OAuth Token Encryption | ✅ | AES-256-GCM mandatory (fails if key missing) |
 | Internal API Secret | ✅ | Server-to-server calls authenticated |
-| CSRF Protection | ✅ | verifyOrigin() on all state-changing endpoints |
+| CSRF Protection | ✅ | verifyOrigin() on ALL state-changing POST endpoints |
 | Rate Limiting | ✅ | All endpoints protected (in-memory, Redis recommended) |
-| Input Validation | ✅ | UUID validation, sanitization |
+| Input Validation | ✅ | UUID + calendarEventId validation, sanitization |
 | SMS Injection Prevention | ✅ | sanitizeForSMS() removes control/Unicode chars |
 | CSP Headers | ✅ | Strict policy in middleware.ts |
 | Timing-Safe Comparisons | ✅ | All secret comparisons |
@@ -686,34 +704,38 @@ When pasting values into Vercel environment variables, invisible newline charact
 | Channel Detection | ✅ | Auto-detect email vs SMS from contact format |
 | Stripe Webhook Verification | ✅ | Signature verification on all webhooks |
 | Stripe Checkout Auth | ✅ | Mandatory authentication (no bypass) |
+| PaymentIntent Protection | ✅ | Never accepts client-supplied PaymentIntent IDs |
+| Server-Side Token Expiry | ✅ | 24h confirmation token expiration enforced server-side |
+| Auto-Resend Limit | ✅ | Max 3 resend attempts per booking |
+| SMS Production Safety | ✅ | Mock SMS returns failure in production |
+| Debug Data Removed | ✅ | Google status endpoint no longer exposes token info |
+| Cron Route Hardening | ✅ | GET handlers removed, POST-only with secret auth |
 | Test Endpoints Blocked | ✅ | /api/test/* returns 404 in production |
 | Production Logging | ✅ | Sensitive logs suppressed via devLog() |
 
 ### 🐛 Known Dashboard Bugs (Identified 2026-02-06)
 
-| Bug | Priority | Description |
-|-----|----------|-------------|
-| 5-second login timeout | 🔴 CRITICAL | Users kicked out if dashboard loads >5s (too aggressive) |
-| Hardcoded protection values | 🔴 HIGH | All events show €30/10min/24h instead of user settings |
-| Dark mode status badges | 🟡 MEDIUM | Poor contrast, colors don't adapt to dark mode |
-| Resend label calculation | 🟡 MEDIUM | Shows incorrect "Resend available in X" messages |
-| Optimistic UI no rollback | 🟡 MEDIUM | UI shows wrong state if API fails |
-| Missing ARIA live regions | 🟡 MEDIUM | Screen readers don't announce status changes |
-| Touch targets too small | 🟡 MEDIUM | Some mobile buttons below 44px minimum |
-
-**Files affected:**
-- `app/dashboard/page.tsx` - timeout logic (line 238), protection values (line 650)
-- `app/dashboard/components/EventCard.tsx` - resend label calculation (line 186)
-- `app/globals.css` - status badge dark mode styles (line 3009)
+| Bug | Priority | Status | Description |
+|-----|----------|--------|-------------|
+| ~~5-second login timeout~~ | 🔴 CRITICAL | ✅ FIXED | Increased to 60s timeout |
+| ~~Hardcoded protection values~~ | 🔴 HIGH | ✅ FIXED | Now fetches from no_show_settings table |
+| ~~Dark mode status badges~~ | 🟡 MEDIUM | ✅ FIXED | Dark mode CSS overrides with proper contrast |
+| ~~Resend label calculation~~ | 🟡 MEDIUM | ✅ FIXED | Now based on lastSentAt + 24h |
+| ~~Optimistic UI no rollback~~ | 🟡 MEDIUM | ✅ FIXED | Toast notifications + state rollback on failure |
+| ~~Missing ARIA live regions~~ | 🟡 MEDIUM | ✅ FIXED | Added role="status" for action feedback |
+| ~~Touch targets too small~~ | 🟡 MEDIUM | ✅ FIXED | min-height: 44px on all dashboard buttons |
 
 ### ⚠️ Partial (Needs Work)
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| No-Show Rules (Per-Event) | 70% | API complete with locking, modal UI incomplete |
-| SMS Capability | 40% | Channel detection works, mock provider only |
-| Distributed Rate Limiting | 0% | Needs Redis/Upstash for production scale |
-| Dashboard Bug Fixes | 0% | See known bugs section above |
+| No-Show Rules (Per-Event) | 85% | API + inline editing wired via `/api/no-show/override`, modal UI not needed |
+| SMS Capability | 40% | Channel detection works, mock provider only (fails in prod) |
+| Distributed Rate Limiting | 0% | Needs Upstash Redis for production scale (in-memory per isolate) |
+| Dashboard Bug Fixes | 100% | All 7 bugs fixed including optimistic rollback |
+| SSR Rate Limiting | 0% | Confirm page needs rate limiting via middleware |
+| Nonce-Based CSP | 0% | Recommended but requires significant Next.js config changes |
+| Vercel Cron Jobs | 0% | Removed for Hobby plan; needs Pro plan or external scheduler |
 
 ### ❌ Not Started
 
@@ -740,29 +762,33 @@ Stripe integration is fully implemented:
 - ✅ Webhook handlers for all events
 - ✅ Customer portal for subscription management
 
-### Phase 2: Dashboard Bug Fixes (Current Priority)
+### ~~Phase 2: Dashboard Bug Fixes~~ ✅ COMPLETE (2026-02-07)
 
-1. **Fix 5-second timeout** - Increase to 30s or remove entirely, rely on proper error handling
-2. **Load real protection values** - Fetch from database instead of hardcoded €30/10min/24h
-3. **Fix dark mode status badges** - Add CSS variables for dark mode contrast
-4. **Fix resend label calculation** - Base on lastSentAt, not current time modulo
+1. ~~**Fix 5-second timeout**~~ ✅ Increased to 60s
+2. ~~**Load real protection values**~~ ✅ Fetches from no_show_settings table (default €20)
+3. ~~**Fix dark mode status badges**~~ ✅ Dark mode CSS overrides with proper contrast
+4. ~~**Fix resend label calculation**~~ ✅ Based on lastSentAt + 24h
+5. ~~**Add ARIA live regions**~~ ✅ role="status" for action feedback
+6. ~~**Fix touch targets**~~ ✅ min-height: 44px on all dashboard buttons
+7. ~~**Optimistic UI rollback**~~ ✅ Toast notifications + state rollback on API failure
 
 ### Phase 3: Core Experience Polish
 
-1. **Complete AppointmentOverrideModal** - Per-event protection editing for Pro users
+1. ~~**Per-event protection editing**~~ ✅ Complete - Inline editing wired to `/api/no-show/override`
 2. ~~**Premium email templates**~~ ✅ Complete - 6 React Email templates
 3. **SMS provider integration** - Connect Twilio or Telnyx
-4. **Add ARIA live regions** - Announce status changes to screen readers
+4. ~~**Add ARIA live regions**~~ ✅ Complete - role="status" with aria-live="polite"
 
-### Phase 4: Marketing & Growth (Mostly Complete)
+### ~~Phase 4: Marketing & Growth~~ ✅ COMPLETE (2026-02-07)
 
 1. ~~**Blog section**~~ ✅ Complete - 9 SEO articles with illustrations
-2. ~~**Social proof counters**~~ ✅ Complete - Animated counters implemented
+2. ~~**Social proof counters**~~ ✅ Complete - Animated counters implemented (later removed)
 3. ~~**Landing page redesign**~~ ✅ Complete - Full DataPulse-style redesign
 4. ~~**Header redesign**~~ ✅ Complete - Glassmorphism floating nav
 5. ~~**Cookie consent**~~ ✅ Complete - Minimal Vercel-style notification
 6. ~~**Stripe integration**~~ ✅ Complete - Full payment system
 7. ~~**Framer Motion animations**~~ ✅ Complete - Smooth hover effects, FAQ accordion
+8. ~~**SEO & Search Indexing**~~ ✅ Complete - Google Search Console, Bing, structured data, OG images, llms.txt
 
 ### Phase 5: Future Features
 
@@ -821,10 +847,16 @@ Building a real SaaS with real money and real customers.
 
 ## 23. Critical Reminders
 
-- **Security audit completed** (2026-02-06) — 3 high + 5 medium priority issues fixed (see Section 12)
-- **Hero stats removed** (2026-02-06) — Counting numbers removed from hero section
+- **SEO & search indexing complete** (2026-02-07) — Google Search Console verified, Bing submitted, structured data (Organization, FAQPage, BlogPosting), OG images, llms.txt
+- **Dashboard bugs ALL fixed** (2026-02-07) — 7/7 bugs fixed including optimistic UI rollback with visible toast notifications
+- **Per-event protection editing wired** (2026-02-07) — Inline editing calls `/api/no-show/override`, tracks overrides in `protectionOverrideMap`
+- **Security audit #2 completed** (2026-02-06) — 13 findings: 2 HIGH, 6 MEDIUM, 5 LOW/INFO. 10 fixed, 3 deferred (see below)
+- **Deferred security items**: (1) Rate limiting on SSR confirm page — needs middleware approach, (2) Distributed rate limiting — needs Upstash Redis, (3) Nonce-based CSP — needs large Next.js config change
+- **Vercel cron jobs removed** (2026-02-06) — `vercel.json` emptied because Hobby plan limits crons to once/day. Cron schedules need external trigger (e.g., Vercel Cron on Pro plan or external scheduler)
+- **SocialProof section removed** (2026-02-06) — Counter stats removed from landing page (not professional)
+- **Skeleton loading states** (2026-02-06) — Dashboard shows skeleton cards instead of spinner during load
+- **Default no-show fee is €20** (2000 cents) — not €30 as was previously hardcoded
 - **Email system complete** (2026-02-06) — 6 React Email templates, run `migrations/email-system.sql` in Supabase
-- **Dashboard bugs identified** (2026-02-06) — see Section 19 for known bugs requiring fixes
 - **Landing page animations added** (2026-02-06) — Framer Motion hover effects, FAQ accordion
 - **Upgrade to Pro button** (2026-02-06) — Added to Starter dashboard header
 - **Stripe integration complete** (2026-02-05) — subscriptions, card auth, and no-show charging all working
