@@ -85,6 +85,17 @@ App/attenda/
 │   │   ├── bookings/     # Booking management
 │   │   └── auth/         # Authentication endpoints
 │   ├── dashboard/        # Protected dashboard (main UI)
+│   │   ├── DashboardContext.tsx  # Sidebar/menu position context
+│   │   ├── components/
+│   │   │   ├── Sidebar.tsx       # Collapsible sidebar navigation
+│   │   │   ├── CalendarView.tsx  # FullCalendar month/week view
+│   │   │   ├── EventCard.tsx     # Event card in list
+│   │   │   ├── EventPopup.tsx    # Event detail popup
+│   │   │   ├── DayEventList.tsx  # Date-grouped event list
+│   │   │   └── CreateEventModal.tsx  # Create/rebook event modal
+│   │   └── settings/
+│   │       └── components/
+│   │           └── NoShowSettingsModal.tsx  # No-show policy popup
 │   ├── login/            # Magic link authentication
 │   ├── confirm/[token]/  # Public client confirmation page (Stripe Payment Element)
 │   ├── welcome/          # Post-checkout welcome page for new Pro users
@@ -284,18 +295,32 @@ For past events:
 
 ## 9. Dashboard Logic
 
+### Navigation (UX Overhaul 2026-02-08)
+
+- **Collapsible sidebar** (desktop >=900px): Logo, Events/Settings nav, plan badge, theme toggle, logout, collapse chevron
+- Sidebar expanded: 240px, collapsed: 64px (state in localStorage)
+- **Header mode** alternative: existing floating header (unchanged)
+- Toggle between sidebar/header in Settings → Calendar Preferences → "Navigation style"
+- `menu_position` preference stored in `profiles` table (`'sidebar'` default or `'header'`)
+- Mobile (<900px): Sidebar hidden, hamburger menu renders as before
+- Key files: `app/dashboard/DashboardContext.tsx`, `app/dashboard/components/Sidebar.tsx`
+
 ### Layout (Redesigned 2026-02-08)
 
 - **Stacked layout**: FullCalendar month grid (full-width) on top, flat date-grouped event list below
 - Clicking a calendar date smooth-scrolls to that date's event section
+- Clicking a calendar date/time slot opens CreateEventModal pre-filled (week view includes time)
 - "Create Event" button inside calendar card (lower-right)
 - No "Today" button — calendar highlights today automatically
+- **Upcoming/Past filter tabs** above event list (default: Upcoming)
 - Events grouped by date with date headers and count badges
+- Week view timegrid slot height: 2em (compact)
 - Calendar preferences stored in `profiles` table:
   - `week_start_day`: 0 (Sunday) or 1 (Monday, default)
   - `time_format`: '24h' (default) or '12h'
-- Preferences configurable in Settings → Calendar Preferences card
+- Preferences configurable in Settings → Calendar Preferences card (iOS-style segment controls)
 - Saved via PATCH `/api/profile/settings`
+- **Timezone fix**: All date comparisons use `toLocalDateStr()` helper (local getFullYear/getMonth/getDate) instead of `toISOString().split("T")[0]` to prevent UTC day-shift bugs
 
 ### Event Cards
 
@@ -648,7 +673,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 
 ---
 
-## 19. Implementation Status (Updated 2026-02-07)
+## 19. Implementation Status (Updated 2026-02-08)
 
 ### ✅ Complete (Working in Production)
 
@@ -662,8 +687,8 @@ When pasting values into Vercel environment variables, invisible newline charact
 | **Blog Section** | 100% | 9 SEO articles with illustrations |
 | **Cookie Consent** | 100% | Minimal Vercel-style notification |
 | **Google Calendar Integration** | 100% | OAuth2, event sync, encrypted token storage |
-| **Dashboard** | 100% | Stacked calendar layout, date-grouped events, calendar preferences (2026-02-08) |
-| **Settings Page** | 100% | Plan display, Pro features, subscription management |
+| **Dashboard** | 100% | Sidebar nav, event filters, click-to-add, segment controls, no-show modal (2026-02-08) |
+| **Settings Page** | 100% | Plan display, Pro features, subscription management, segment controls |
 | **Optimistic UI** | 100% | Instant updates, rollback on failure, visible toast notifications |
 | **Stripe Integration** | 100% | Subscriptions, card auth, no-show charging (2026-02-05) |
 | Booking Management | 95% | Draft → Pending → Confirmed flow |
@@ -851,6 +876,13 @@ Current tables in use:
 
 **Migration file:** `migrations/calendar-preferences.sql` (run in Supabase SQL Editor)
 
+**Navigation preference column (added 2026-02-08):**
+
+`profiles` table:
+- `menu_position` - TEXT DEFAULT 'sidebar' ('sidebar' or 'header')
+
+**Migration file:** `migrations/menu-position.sql` (run in Supabase SQL Editor)
+
 ---
 
 ## 22. Goal
@@ -868,6 +900,7 @@ Building a real SaaS with real money and real customers.
 
 ## 23. Critical Reminders
 
+- **Dashboard UX overhaul** (2026-02-08) — Collapsible sidebar nav (desktop >=900px), Upcoming/Past event filter tabs, click-to-add events (week view includes time pre-fill), iOS-style segment controls in settings, No-Show Policy modal (replaces page navigation), Apple Calendar removed from settings, Today button removed, timezone day-shift bug fixed. Migration: `migrations/menu-position.sql`. Key files: `DashboardContext.tsx`, `Sidebar.tsx`, `NoShowSettingsModal.tsx`
 - **Dashboard calendar redesign** (2026-02-08) — Stacked layout (calendar top, date-grouped events below), scroll-to-date on click, Create Event inside calendar card, calendar preferences (week start, time format) in Settings. Migration: `migrations/calendar-preferences.sql`
 - **SEO & search indexing complete** (2026-02-07) — Google Search Console verified, Bing submitted, structured data (Organization, FAQPage, BlogPosting), OG images, llms.txt
 - **Dashboard bugs ALL fixed** (2026-02-07) — 7/7 bugs fixed including optimistic UI rollback with visible toast notifications
