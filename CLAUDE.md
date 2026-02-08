@@ -295,32 +295,47 @@ For past events:
 
 ## 9. Dashboard Logic
 
-### Navigation (UX Overhaul 2026-02-08)
+### Navigation (Updated 2026-02-08)
 
-- **Collapsible sidebar** (desktop >=900px): Logo, Events/Settings nav, plan badge, theme toggle, logout, collapse chevron
+- **Collapsible sidebar** (desktop >=900px): Logo + Pro badge, Events/Settings nav, account email, theme toggle (icon-only), logout, collapse chevron
+- Sidebar logo area: `Attenda ⭐ Pro` badge inline with logo text (Pro users only)
+- Sidebar bottom: account email (with user icon) replaces old plan badge, usage counter for Starter
 - Sidebar expanded: 240px, collapsed: 64px (state in localStorage)
 - **Header mode** alternative: existing floating header (unchanged)
 - Toggle between sidebar/header in Settings → Calendar Preferences → "Navigation style"
 - `menu_position` preference stored in `profiles` table (`'sidebar'` default or `'header'`)
-- Mobile (<900px): Sidebar hidden, hamburger menu renders as before
+- **Mobile (<900px)**: Sidebar hidden, DashboardHeader shown via `.dashboard-mobile-header-fallback` wrapper (Attenda logo left, hamburger right)
 - Key files: `app/dashboard/DashboardContext.tsx`, `app/dashboard/components/Sidebar.tsx`
 
-### Layout (Redesigned 2026-02-08)
+### Layout (Updated 2026-02-08)
 
 - **Stacked layout**: FullCalendar month grid (full-width) on top, flat date-grouped event list below
 - Clicking a calendar date smooth-scrolls to that date's event section
-- Clicking a calendar date/time slot opens CreateEventModal pre-filled (week view includes time)
+- Clicking a calendar date/time slot opens CreateEventModal pre-filled (week view includes time via `select` handler)
 - "Create Event" button inside calendar card (lower-right)
 - No "Today" button — calendar highlights today automatically
+- **Past days locked**: Cannot create events on past dates, past days dimmed (opacity 0.65, darker background)
+- **Calendar day highlight resets** when CreateEventModal closes (`selectedDate` set to null)
 - **Upcoming/Past filter tabs** above event list (default: Upcoming)
+- **Scroll-to-top button** (chevron-up) appears after scrolling 600px
 - Events grouped by date with date headers and count badges
-- Week view timegrid slot height: 2em (compact)
+- Week view: timegrid slot height 2em (compact), `allDaySlot: false`, hover animation on slots
+- Week view respects `timeFormat` setting (24h/12h) via `slotLabelFormat`
+- **Month title centered** via flex toolbar chunks, smooth fade-in animation on month change
 - Calendar preferences stored in `profiles` table:
   - `week_start_day`: 0 (Sunday) or 1 (Monday, default)
   - `time_format`: '24h' (default) or '12h'
-- Preferences configurable in Settings → Calendar Preferences card (iOS-style segment controls)
+- Preferences configurable in Settings → Calendar Preferences card (stacked layout: label on top, full-width toggle underneath)
 - Saved via PATCH `/api/profile/settings`
 - **Timezone fix**: All date comparisons use `toLocalDateStr()` helper (local getFullYear/getMonth/getDate) instead of `toISOString().split("T")[0]` to prevent UTC day-shift bugs
+
+### Settings Page (Updated 2026-02-08)
+
+- **No standalone Plan card** — merged into unified Account card
+- **Account card**: Shows email, subscription status (Pro Active ⭐ / Starter), usage, Manage/Upgrade button
+- **No-Show Policy card**: Same style as other cards (`--color-bg-card`), "Edit" button (opens NoShowSettingsModal)
+- **All cards use consistent** `--color-bg-card` background and `--color-text` / `--color-text-secondary` font colors
+- **Theme toggle**: Icon-only (no round border) for both dashboard sidebar and landing page header
 
 ### Event Cards
 
@@ -900,6 +915,7 @@ Building a real SaaS with real money and real customers.
 
 ## 23. Critical Reminders
 
+- **Dashboard UI polish** (2026-02-08) — Sidebar: Pro badge next to logo, account email in bottom, icon-only theme toggle. Calendar: past days locked/dimmed, week view allDaySlot removed, 24h/12h respected in slot labels, select handler for reliable week click-to-create, month title centered with fade animation, scroll-to-top button. Settings: Plan card merged into Account card, No-Show Policy same style as other cards with "Edit" button, Calendar Preferences stacked layout, consistent `--color-bg-card` and font variables. Login: Welcome Back animation removed. Mobile: DashboardHeader fallback shown when sidebar mode active (<900px).
 - **Dashboard UX overhaul** (2026-02-08) — Collapsible sidebar nav (desktop >=900px), Upcoming/Past event filter tabs, click-to-add events (week view includes time pre-fill), iOS-style segment controls in settings, No-Show Policy modal (replaces page navigation), Apple Calendar removed from settings, Today button removed, timezone day-shift bug fixed. Migration: `migrations/menu-position.sql`. Key files: `DashboardContext.tsx`, `Sidebar.tsx`, `NoShowSettingsModal.tsx`
 - **Dashboard calendar redesign** (2026-02-08) — Stacked layout (calendar top, date-grouped events below), scroll-to-date on click, Create Event inside calendar card, calendar preferences (week start, time format) in Settings. Migration: `migrations/calendar-preferences.sql`
 - **SEO & search indexing complete** (2026-02-07) — Google Search Console verified, Bing submitted, structured data (Organization, FAQPage, BlogPosting), OG images, llms.txt
