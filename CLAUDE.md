@@ -284,6 +284,19 @@ For past events:
 
 ## 9. Dashboard Logic
 
+### Layout (Redesigned 2026-02-08)
+
+- **Stacked layout**: FullCalendar month grid (full-width) on top, flat date-grouped event list below
+- Clicking a calendar date smooth-scrolls to that date's event section
+- "Create Event" button inside calendar card (lower-right)
+- No "Today" button — calendar highlights today automatically
+- Events grouped by date with date headers and count badges
+- Calendar preferences stored in `profiles` table:
+  - `week_start_day`: 0 (Sunday) or 1 (Monday, default)
+  - `time_format`: '24h' (default) or '12h'
+- Preferences configurable in Settings → Calendar Preferences card
+- Saved via PATCH `/api/profile/settings`
+
 ### Event Cards
 
 **Future events** (Draft / Pending / Confirmed):
@@ -649,7 +662,7 @@ When pasting values into Vercel environment variables, invisible newline charact
 | **Blog Section** | 100% | 9 SEO articles with illustrations |
 | **Cookie Consent** | 100% | Minimal Vercel-style notification |
 | **Google Calendar Integration** | 100% | OAuth2, event sync, encrypted token storage |
-| **Dashboard** | 95% | Event cards, filtering, upgrade button, all bugs fixed |
+| **Dashboard** | 100% | Stacked calendar layout, date-grouped events, calendar preferences (2026-02-08) |
 | **Settings Page** | 100% | Plan display, Pro features, subscription management |
 | **Optimistic UI** | 100% | Instant updates, rollback on failure, visible toast notifications |
 | **Stripe Integration** | 100% | Subscriptions, card auth, no-show charging (2026-02-05) |
@@ -830,6 +843,14 @@ Current tables in use:
 
 **Migration file:** `migrations/stripe-integration.sql` (run in Supabase SQL Editor)
 
+**Calendar preferences columns (added 2026-02-08):**
+
+`profiles` table:
+- `week_start_day` - INTEGER DEFAULT 1 (0=Sunday, 1=Monday)
+- `time_format` - TEXT DEFAULT '24h' ('24h' or '12h')
+
+**Migration file:** `migrations/calendar-preferences.sql` (run in Supabase SQL Editor)
+
 ---
 
 ## 22. Goal
@@ -847,6 +868,7 @@ Building a real SaaS with real money and real customers.
 
 ## 23. Critical Reminders
 
+- **Dashboard calendar redesign** (2026-02-08) — Stacked layout (calendar top, date-grouped events below), scroll-to-date on click, Create Event inside calendar card, calendar preferences (week start, time format) in Settings. Migration: `migrations/calendar-preferences.sql`
 - **SEO & search indexing complete** (2026-02-07) — Google Search Console verified, Bing submitted, structured data (Organization, FAQPage, BlogPosting), OG images, llms.txt
 - **Dashboard bugs ALL fixed** (2026-02-07) — 7/7 bugs fixed including optimistic UI rollback with visible toast notifications
 - **Per-event protection editing wired** (2026-02-07) — Inline editing calls `/api/no-show/override`, tracks overrides in `protectionOverrideMap`
