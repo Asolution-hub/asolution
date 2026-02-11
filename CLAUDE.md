@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code when working with this repository.
 
-## Important: Development Rules
+## Development Rules
 
 - Do NOT invent features not described in this document
 - Do NOT remove safeguards
@@ -22,31 +22,65 @@ This file provides guidance to Claude Code when working with this repository.
 - **GitHub**: github.com/Asolution-hub/attenda
 - **This is a real, paid product** — assume real users, real money, legal implications, and long-term maintenance
 - Landing page + Dashboard live in one Next.js project
-- Both share the same design language, UI components, and UX quality
 
 **Design principles**: Premium, Calm, Trustworthy, Modern
 
-**Design system** (as of 2026-02-01):
+**Design system**:
 - Colors: Indigo primary (`#6366F1`), Teal accent (`#14B8A6`)
 - Typography: Inter font (weights 400-800)
 - Style: DataPulse-inspired SaaS analytics aesthetic
 
+**UI/UX rules**: Premium, minimal, calm. No clutter. Starter feels complete but limited. Pro feels clearly more powerful. Visual affordances for Pro-only features.
+
 ---
 
-## 2. Core Value Proposition
+## 2. Core Value Proposition & Payment Flow (NON-NEGOTIABLE)
 
-Businesses lose money because customers don't show up.
+Businesses lose money because customers don't show up. Attenda solves this with booking confirmations, clear no-show rules, **Stripe Connect**, card authorization, and charging **only** if the business manually confirms a no-show.
 
-Attenda solves this by:
-- Sending booking confirmations
-- Clearly explaining no-show rules
-- Requiring payment authorization via Stripe
-- Charging **only** if the business manually confirms a no-show
+### Critical Payment Architecture (Stripe Connect)
 
-**Critical rules:**
+**Money Flow:**
+1. Business registers with Stripe Connect (Standard connected account)
+2. Client authorizes card → PaymentIntent created **on business's connected account**
+3. No-show happens → Business clicks "Mark no-show" → Money goes **directly to business's bank account**
+4. Attenda takes platform fee (2-5% or subscription)
+
+**Why Stripe Connect is mandatory:**
+- Attenda cannot hold business revenue (illegal, not scalable)
+- Stripe handles: payouts, tax reporting, compliance, KYC
+- Businesses must complete onboarding before creating events
+- Standard marketplace model (like Airbnb, Uber, Shopify)
+
+**Charging prerequisites — ALL must be true:**
+1. Business completed Stripe Connect onboarding (`onboarding_completed = true`)
+2. Confirmation was sent to customer
+3. Customer completed Stripe authorization
+4. Business manually clicked "Mark no-show"
+
+**If any prerequisite is missing, charge MUST fail.**
+
 - No automatic charging ever
 - No hidden behavior
-- No money charged unless business explicitly marks no-show
+- "Mark attended" → no charge, authorization released
+- "Confirmation expired" → no charge
+
+### Business Registration Flow
+
+**First-time user journey:**
+1. User logs in (magic link / Google OAuth)
+2. Redirected to `/onboarding/business` (BEFORE dashboard access)
+3. Stripe Connect onboarding (business details, bank account, verification)
+4. Status: `pending` → `enabled` (1-2 days)
+5. Can create events but can't send confirmations until verified
+6. Email notification when verified
+
+**Database fields:**
+- `stripe_account_id` - Connected account ID
+- `stripe_account_status` - 'pending' | 'enabled' | 'restricted' | 'disabled'
+- `onboarding_completed` - Must be true to send confirmations
+- `business_name`, `business_address`, `business_vat`, `business_country`
+- `currency` - 'eur' | 'usd' (based on country)
 
 ---
 
@@ -66,9 +100,9 @@ npm run lint     # ESLint
 
 - **Framework**: Next.js 16 with App Router, React 19, TypeScript
 - **Styling**: Tailwind CSS 4
-- **Database/Auth**: Supabase (PostgreSQL + magic link auth)
-- **Payments**: Stripe (subscriptions + card authorization)
-- **External APIs**: Google Calendar (OAuth2), Resend (email)
+- **Database/Auth**: Supabase (PostgreSQL + magic link auth + Google OAuth login)
+- **Payments**: Stripe Connect (Standard accounts) + Subscriptions + Card authorization
+- **External APIs**: Google Calendar (OAuth2), Resend (email), Twilio (SMS - to be implemented)
 - **Path alias**: `@/*` maps to project root
 
 ---
@@ -81,27 +115,21 @@ npm run lint     # ESLint
 App/attenda/
 ├── app/
 │   ├── api/              # API route handlers
-│   │   ├── stripe/       # Stripe endpoints (checkout, webhooks, portal)
-│   │   ├── bookings/     # Booking management
+│   │   ├── stripe/       # Stripe endpoints (checkout, webhooks, portal, connect)
+│   │   ├── bookings/     # Booking management, refunds
 │   │   └── auth/         # Authentication endpoints
 │   ├── dashboard/        # Protected dashboard (main UI)
-│   │   ├── DashboardContext.tsx  # Sidebar/menu position context
-│   │   ├── components/
-│   │   │   ├── Sidebar.tsx       # Collapsible sidebar navigation
-│   │   │   ├── CalendarView.tsx  # FullCalendar month/week view
-│   │   │   ├── EventCard.tsx     # Event card in list
-│   │   │   ├── EventPopup.tsx    # Event detail popup
-│   │   │   ├── DayEventList.tsx  # Date-grouped event list
-│   │   │   └── CreateEventModal.tsx  # Create/rebook event modal
-│   │   └── settings/
-│   │       └── components/
-│   │           └── NoShowSettingsModal.tsx  # No-show policy popup
+│   ├── onboarding/       # Business registration flow (Stripe Connect)
 │   ├── login/            # Magic link authentication
 │   ├── confirm/[token]/  # Public client confirmation page (Stripe Payment Element)
 │   ├── welcome/          # Post-checkout welcome page for new Pro users
+│   ├── admin/            # Internal admin tools (webhook reconciliation, monitoring)
+│   ├── (landing)/components/  # Landing page components
 │   └── components/       # Shared React components
 ├── lib/                  # Utilities and helpers
+├── emails/               # React Email templates
 ├── migrations/           # SQL migrations for Supabase
+└── docs/                 # Implementation plans, PRD
 ```
 
 ### Key Libraries
@@ -111,34 +139,51 @@ App/attenda/
 - `lib/validation.ts` - Input validation (UUID, calendarEventId), rate limiting, sanitization, timing protection
 - `lib/encryption.ts` - AES-256-GCM token encryption for OAuth tokens
 - `lib/googleAuth.ts` - OAuth2 client with encrypted token storage
-- `lib/stripe.ts` - Stripe client with helpers (authorization, capture, void, subscriptions)
+- `lib/stripe.ts` - Stripe Connect helpers (onboarding, payouts, connected accounts)
 - `lib/noShowRules.ts` - Resolves global + per-appointment rule overrides
 - `lib/contactParser.ts` - Extracts email/phone from event text
 - `lib/email.ts` - Email sending via Resend
+- `lib/sms.ts` - SMS sending via Twilio (to be implemented)
 - `lib/useUser.ts` - React hook for auth state
 - `lib/plans.ts` - Plan configuration (Starter/Pro/Business) with Stripe price IDs
+- `lib/currency.ts` - Multi-currency support (EUR/USD)
 - `lib/types.ts` - Shared TypeScript types
 
-### Key API Routes (Stripe)
+### Key API Routes
 
-- `app/api/stripe/create-checkout/route.ts` - Pro checkout for logged-in users
-- `app/api/stripe/create-checkout-guest/route.ts` - Pro checkout for new users (no auth)
-- `app/api/stripe/create-authorization/route.ts` - Card authorization for booking confirmation
-- `app/api/stripe/customer-portal/route.ts` - Stripe billing portal redirect
-- `app/api/stripe/webhook/route.ts` - Handles all Stripe webhook events
+**Stripe Connect:**
+- `app/api/stripe/connect/onboard` - Create connected account + onboarding link
+- `app/api/stripe/connect/return` - Handle onboarding completion
+- `app/api/stripe/connect/status` - Check account status
+- `app/api/stripe/connect/dashboard` - Generate Express Dashboard link
+- `app/api/stripe/connect/webhook` - Handle Connect-specific webhooks
 
-### Database Tables (Supabase)
+**Payments:**
+- `app/api/stripe/create-checkout` - Pro checkout for logged-in users
+- `app/api/stripe/create-checkout-guest` - Pro checkout for new users (no auth)
+- `app/api/stripe/create-authorization` - Card authorization (on connected account)
+- `app/api/stripe/customer-portal` - Stripe billing portal redirect
+- `app/api/stripe/webhook` - Handles all Stripe webhook events (idempotent)
 
-- `profiles` - User accounts and plan selection
-- `google_connections` - OAuth tokens
-- `calendar_bookings` - Synced appointments
-- `booking_confirmations` - Confirmation tokens and status
-- `no_show_settings` - Global rules per user
-- `appointment_no_show_overrides` - Per-event rule overrides
+**Bookings:**
+- `app/api/bookings/[id]/refund` - Issue full/partial refund
+- `app/api/no-show/settings` - GET (auto-creates defaults if missing)
+- `app/api/no-show/override` - Per-event protection overrides
+- `app/api/events/list` - Google + manual events
+
+**Admin:**
+- `app/api/admin/reconcile` - Compare Stripe vs DB for mismatches
+- `app/api/admin/webhooks` - View/retry failed webhooks
+- `app/api/health` - Health check endpoint for monitoring
+
+**User:**
+- `app/api/profile/settings` - PATCH for calendar preferences, business settings
+- `app/api/profile/export` - GDPR data export (JSON)
+- `app/api/profile/delete` - Account deletion (anonymize data, cancel subscriptions)
 
 ---
 
-## 6. Plans & Pricing
+## 6. Plans, Pricing & Limits
 
 ### Starter (Free)
 - Max 30 protected appointments per month
@@ -147,45 +192,40 @@ App/attenda/
 - No auto-resend
 - Limited settings
 - Upgrade CTA visible everywhere
+- When limit reached: no confirmations sent, UI shows "Protection not applied — monthly limit reached"
+- Dashboard counter: "Protection used this month: X / 30"
+- At 25/30: upgrade encouragement email sent
+- Email branding: "via Attenda" footer
 
 ### Pro (€39 / $39 per month)
 - Unlimited appointments
-- Email + SMS confirmations
+- Email + SMS confirmations (SMS to be implemented)
 - Auto-resend available
 - Per-appointment protection rules
+- White-label email option (remove Attenda branding, use business logo)
 - Priority UX / visual polish
+- Access to Stripe Express Dashboard
 
 ### Business
-- Not available yet
-- Code should anticipate it without exposing UI
+- Not available yet — code should anticipate it without exposing UI
+- Planned: Multi-user accounts, API access, custom integrations
 
 ### Pricing Rules
-- EU countries → EUR
-- Rest of world → USD
+- EU countries → EUR, rest of world → USD
 - Numeric price stays the same (39)
+- Currency stored per booking
+- Display correct symbol in UI
+
+### Pro Signup Flows
+
+| From | Flow |
+|------|------|
+| Landing page (new user) | Get Pro → Stripe Checkout → `/welcome` page → Magic link email → Business onboarding → Dashboard |
+| Dashboard (existing user) | Upgrade to Pro → Stripe Checkout → Settings page with success message |
 
 ---
 
-## 7. Stripe Rules (NON-NEGOTIABLE)
-
-Stripe is used for:
-- Pro subscriptions
-- Card authorization during confirmation
-
-**Critical flow:**
-1. Client authorizes card when confirming booking
-2. No money is charged at confirmation
-3. Charge happens **only** if:
-   - Event has started AND
-   - Business clicks "Mark no-show"
-4. "Mark attended" → no charge
-5. "Confirmation expired" → no charge
-
-**This must never be violated.**
-
----
-
-## 8. Event & Booking Lifecycle
+## 7. Event & Booking Lifecycle
 
 ### Statuses
 
@@ -200,748 +240,502 @@ For each connected calendar:
 
 **Contact Extraction:**
 - Scan both event title AND description
-- Priority: First valid email → use `email` channel; else first valid phone → use `sms` channel
+- Priority: First valid email → `email` channel; else first valid phone → `sms` channel
 - Strip contact info from displayed event title
-- Store contact separately as `client_contact`
-- Store channel as `email` | `sms`
+- Store contact separately as `client_contact`, channel as `email` | `sms`
 
-**If no contact found:**
-- Event is still shown in dashboard
-- Confirmation actions are disabled
-- UI warning: "No contact found — add email or phone to event"
+**If no contact found:** Event shown but confirmation actions disabled. UI warning: "No contact found — add email or phone to event"
 
 ### Booking States
 
-**Draft:**
-- Booking created from calendar event
-- Confirmation NOT sent yet
-- Draft window = configurable minutes
-- During draft:
-  - Business can edit protection rules (Pro only)
-  - Business can manually send confirmation
-- After draft expires:
-  - Starter → auto-send once
-  - Pro → auto-send + optional auto-resend
+**Draft:** Booking created from calendar event. Confirmation NOT sent yet. Draft window = configurable minutes. During draft: business can edit protection rules (Pro only) and manually send confirmation. After draft expires: Starter auto-sends once, Pro auto-sends + optional auto-resend.
 
-**Pending:**
-- Confirmation has been sent
-- Waiting for customer confirmation
-- Payment authorization may or may not be completed yet
+**Pending:** Confirmation sent, waiting for customer confirmation. Payment authorization may or may not be completed.
 
-**Confirmed:**
-- Customer confirmed booking
-- Stripe authorization completed
-- Booking is protected
+**Confirmed:** Customer confirmed, Stripe authorization completed, booking is protected.
 
 ### Protection Rules
 
-Each booking has protection rules:
-- No-show fee (currency minor units)
-- Grace period (minutes)
-- Late cancellation window (hours)
+Each booking has: no-show fee (currency minor units), grace period (minutes), late cancellation window (hours).
 
-**Starter:** Uses global protection rules only, cannot edit per booking
-**Pro:** Can override protection rules per booking
-**Important:** Overrides are locked once confirmation is sent
+- **Starter**: Global protection rules only, cannot edit per booking
+- **Pro**: Can override protection rules per booking
+- **Important**: Overrides locked once confirmation is sent
 
 ### Confirmation Flow
 
-Confirmation may be sent:
-- Automatically (after draft window expires)
-- Manually (via dashboard button)
+Sent automatically (after draft window) or manually (dashboard button). Creates `booking_confirmation` record, generates unique token, sends email/SMS.
 
-Sending confirmation:
-- Creates a `booking_confirmation` record
-- Generates a unique token
-- Sends email or SMS based on detected channel
-
-### Confirmation Message Must Include:
-- Event details
-- No-show fee
-- Cancellation window
-- Clear statement: "Your card will be authorized, not charged"
-- Stripe authorization link (Card / Apple Pay / Google Pay)
+**Confirmation message must include:** Event details, no-show fee, cancellation window, "Your card will be authorized, not charged", Stripe authorization link (Card/Apple Pay/Google Pay).
 
 ### Stripe Authorization (Customer Side)
 
-When customer clicks confirmation link:
-- Stripe Checkout / Payment Intent is created
-- Authorization only — no funds captured
-- Supported methods: Card, Apple Pay, Google Pay
+When customer clicks confirmation link: PaymentIntent created **on business's connected account**, authorization only — no funds captured. Supported: Card, Apple Pay, Google Pay. If authorization fails, booking remains unconfirmed. Failed attempts tracked, business notified after 3 failures.
 
-**If authorization fails:** Booking remains unconfirmed
+**PaymentIntent expiration handling:**
+- PIs expire after 7 days
+- Cron job monitors expiring authorizations
+- Auto-renew if appointment still upcoming
+- Notify client to re-authorize if needed
 
 ### Event Day Logic
 
-**Before event start:**
-- No attendance actions allowed
+**Before event start:** No attendance actions allowed.
 
 **After event start:**
 
 | Action | Result |
 |--------|--------|
-| Mark attended | Booking finalized as attended, authorization released, no charge |
-| Mark no-show | No-show fee captured via Stripe, booking finalized as no-show, receipt sent |
+| Mark attended | Authorization released, no charge |
+| Mark no-show | No-show fee captured via Stripe, money goes to business bank, receipt sent |
 
-**Only manual action can trigger a charge.**
+**Past events:** No action buttons, only final state displayed.
 
-### Past Events
+### Refunds & Disputes
 
-For past events:
-- No action buttons shown
-- Only final state displayed: Attended | No-Show applied | Confirmation expired
+**Refunds:**
+- Business can issue full/partial refund via "Issue Refund" button
+- Tracked in `stripe_refunds` table
+- Client notified via email
+- Reasons: customer dispute, showed up (marked wrong), business decision
+
+**Disputes/Chargebacks:**
+- Tracked in `stripe_disputes` table
+- Business notified immediately
+- Evidence due date tracked
+- Webhook handlers for `dispute.created`, `dispute.updated`, `dispute.closed`
+- Dashboard shows active disputes with links to Stripe Dashboard
 
 ---
 
-## 9. Dashboard Logic
+## 8. Dashboard
 
-### Navigation (Updated 2026-02-08)
+### Navigation
 
-- **Collapsible sidebar** (desktop >=900px): Logo + Pro badge, Events/Settings nav, account email, theme toggle (icon-only), logout, collapse chevron
-- Sidebar logo area: `Attenda ⭐ Pro` badge inline with logo text (Pro users only)
-- Sidebar bottom: account email (with user icon) replaces old plan badge, usage counter for Starter
+- **Collapsible sidebar** (desktop >=900px): Logo + Pro badge, Events/Settings nav, Upgrade to Pro (Starter only), account email, theme toggle (icon-only), logout, collapse chevron
 - Sidebar expanded: 240px, collapsed: 64px (state in localStorage)
-- **Header mode** alternative: existing floating header (unchanged)
+- **Upgrade to Pro button**: Right below nav links (Events/Settings), visible when collapsed too
+- `menu_position` in `profiles` table (`'sidebar'` default or `'header'`)
 - Toggle between sidebar/header in Settings → Calendar Preferences → "Navigation style"
-- `menu_position` preference stored in `profiles` table (`'sidebar'` default or `'header'`)
-- **Mobile (<900px)**: Sidebar hidden, DashboardHeader shown via `.dashboard-mobile-header-fallback` wrapper (Attenda logo left, hamburger right)
-- Key files: `app/dashboard/DashboardContext.tsx`, `app/dashboard/components/Sidebar.tsx`
+- **Mobile (<900px)**: Sidebar hidden, `DashboardHeader` shown via `.dashboard-mobile-header-fallback`
+- Key files: `DashboardContext.tsx`, `Sidebar.tsx`
 
-### Layout (Updated 2026-02-08)
+### Layout
 
-- **Stacked layout**: FullCalendar month grid (full-width) on top, flat date-grouped event list below
+- **Stacked layout**: FullCalendar month grid on top, flat date-grouped event list below
+- **Filter + Create Event row**: Below calendar, shows on all screen sizes (Upcoming/Past + Create Event button)
 - Clicking a calendar date smooth-scrolls to that date's event section
 - Clicking a calendar date/time slot opens CreateEventModal pre-filled (week view includes time via `select` handler)
-- "Create Event" button inside calendar card (lower-right)
-- No "Today" button — calendar highlights today automatically
-- **Past days locked**: Cannot create events on past dates, past days dimmed (opacity 0.65, darker background)
-- **Calendar day highlight resets** when CreateEventModal closes (`selectedDate` set to null)
-- **Upcoming/Past filter tabs** above event list (default: Upcoming)
-- **Scroll-to-top button** (chevron-up) appears after scrolling 600px
-- Events grouped by date with date headers and count badges
-- Week view: timegrid slot height 2em (compact), `allDaySlot: false`, hover animation on slots
-- Week view respects `timeFormat` setting (24h/12h) via `slotLabelFormat`
-- **Month title centered** via flex toolbar chunks, smooth fade-in animation on month change
-- Calendar preferences stored in `profiles` table:
-  - `week_start_day`: 0 (Sunday) or 1 (Monday, default)
-  - `time_format`: '24h' (default) or '12h'
-- Preferences configurable in Settings → Calendar Preferences card (stacked layout: label on top, full-width toggle underneath)
-- Saved via PATCH `/api/profile/settings`
-- **Timezone fix**: All date comparisons use `toLocalDateStr()` helper (local getFullYear/getMonth/getDate) instead of `toISOString().split("T")[0]` to prevent UTC day-shift bugs
+- **Past days locked**: Cannot create events on past dates, past days dimmed
+- **Calendar day highlight resets** when CreateEventModal closes
+- **Scroll-to-top button** (chevron-up) after 600px scroll
+- Week view: `allDaySlot: false`, respects `timeFormat` (24h/12h) via `slotLabelFormat`
+- **Month title centered** via flex toolbar chunks, fade-in animation on month change
+- **Timezone fix**: Use `toLocalDateStr()` helper, NOT `toISOString().split("T")[0]`
+- Calendar preferences in `profiles`: `week_start_day` (0=Sun, 1=Mon default), `time_format` ('24h' default or '12h'), `timezone` (business timezone)
+- WelcomeEmpty shown when 0 events AND no calendar connected
 
-### Settings Page (Updated 2026-02-08)
+### Onboarding Banners
 
-- **No standalone Plan card** — merged into unified Account card
-- **Account card**: Shows email, subscription status (Pro Active ⭐ / Starter), usage, Manage/Upgrade button
-- **No-Show Policy card**: Same style as other cards (`--color-bg-card`), "Edit" button (opens NoShowSettingsModal)
-- **All cards use consistent** `--color-bg-card` background and `--color-text` / `--color-text-secondary` font colors
-- **Theme toggle**: Icon-only (no round border) for both dashboard sidebar and landing page header
+**Pending Verification (Stripe Connect):**
+```
+⏳ Business Verification Pending
+Stripe is verifying your account (1-2 days).
+You can create events but can't send confirmations yet.
+[ Check Status ] [ View Requirements ]
+```
 
-### Event Cards
+**Restricted Account:**
+```
+⚠️ Action Required - Account Restricted
+Stripe needs additional information to enable payouts.
+[ Resolve Issues in Stripe Dashboard ]
+```
 
-**Future events** (Draft / Pending / Confirmed):
-- Show relevant buttons only
-- "Mark attended" / "Mark no-show" buttons: DISABLED until event start time
+### Settings Page
 
-**Past events** (event has ended):
-- No action buttons shown
-- Only final state displayed: Attended | No-Show applied | Confirmation expired
+- **Account card**: Name (editable), Email, subscription status (Pro Active / Starter), usage, Manage/Upgrade button
+- **Business Account card** (new): Business name, account status, last payout, links to Stripe Dashboard
+- **No-Show Policy card**: "Edit" button opens `NoShowSettingsModal`
+- **Notifications section**: Email confirmations (always on), SMS confirmations (Pro, to be implemented), Auto-Resend (Pro)
+- **Calendar Preferences**: Stacked layout, full-width toggles (week start, time format, nav style, timezone)
+- **Data & Privacy card** (new): Export My Data, Delete My Account
+- **Disputes section** (new): Active disputes, past disputes, links to evidence submission
+- All cards use `--color-bg-card` background, `--color-text` / `--color-text-secondary` font colors
+- Theme toggle: icon-only (no border)
 
-### Buttons (Strict Rules)
+### Event Card Buttons (Strict Rules)
 
 | Button | When Enabled |
 |--------|--------------|
-| Send confirmation | Draft state, contact exists, within limits |
+| Send confirmation | Draft state, contact exists, within limits, **onboarding complete** |
 | Send reminder | Pending/Confirmed, Pro plan, before event start |
 | Mark attended | After event start, confirmed booking |
 | Mark no-show | After event start, confirmed booking with authorization |
+| Issue Refund | After no-show marked |
+| Edit/Delete | Draft manual events only (Edit button + Delete button together) |
 
-Buttons must enable/disable based on time, plan, and status. Never allow illegal actions.
-
-### Protection Visibility
-
-Always show: Fee, Grace period, Late cancellation window
-
-- **Starter**: Global only
-- **Pro**: Per-event editable
+Buttons must enable/disable based on time, plan, status, and onboarding. Never allow illegal actions.
 
 ---
 
-## 10. Monthly Limit (Starter)
-
-- Starter limited to 30 protected appointments per calendar month
-- When limit reached:
-  - No confirmations are sent
-  - UI shows: "Protection not applied — monthly limit reached"
-- Dashboard counter: "Protection used this month: X / 30"
-- At 25/30: Send upgrade encouragement email
-- Starter dashboard includes Upgrade to Pro CTA
-
----
-
-## 11. Calendar Integrations
-
-### Required (now)
-- Google Calendar (already implemented)
-
-### Designed for future
-- Apple Calendar
-- Microsoft Outlook Calendar
-
-Architecture must be provider-agnostic — allow new calendars without refactoring core booking logic.
-
----
-
-## 12. Authentication & Security
+## 9. Authentication & Security
 
 ### Authentication
 - Supabase authentication (magic links + Google OAuth login)
 - Google OAuth for calendar integration (separate from login)
 - Session management via Supabase cookies
+- Admin routes protected by email whitelist
 
 **Note:** Google OAuth is used in two places:
 1. **Login** - Via Supabase Auth (configured in Supabase dashboard)
-2. **Calendar** - Direct OAuth2 for Google Calendar API access
+2. **Calendar** - Direct OAuth2 for Google Calendar API access (token refresh implemented)
 
-### Security Architecture (Updated 2026-02-06, Audit #2 Complete)
+### Security Architecture
 
-**API Route Protection:**
-- All routes use `verifyUserAccess()` from `lib/auth.ts`
-- UUID validation on all user/resource IDs via `isValidUUID()`
-- Calendar event ID validation via `isValidCalendarEventId()` (alphanumeric + hyphens/underscores/dots, max 1024 chars)
-- Rate limiting on all endpoints via `checkRateLimit()`
-- Ownership verification on all resource access
-- CSRF protection via `verifyOrigin()` on ALL state-changing POST endpoints
+**Row Level Security (RLS):** ✅ **IMPLEMENTED (2026-02-11)** - All 8 core tables protected with user-scoped RLS policies using `auth.uid()`. Users can only access their own data. Migration: `migrations/005-enable-rls-EXISTING-TABLES-ONLY.sql`. Tables secured: profiles, calendar_bookings, booking_confirmations, google_connections, no_show_settings, appointment_no_show_overrides, appointment_attendance, clients.
 
-**Token Security:**
-- OAuth tokens encrypted with AES-256-GCM (`lib/encryption.ts`) - MANDATORY
-- Cron jobs authenticated via `verifyCronSecret()`
-- Internal API calls authenticated via `verifyInternalSecret()`
-- Token enumeration prevented via `constantTimeDelay()`
-- Server-side 24h confirmation token expiration check (not just client-side)
+**API Route Protection:** All routes use `verifyUserAccess()`. UUID validation via `isValidUUID()`. Calendar event ID validation via `isValidCalendarEventId()`. Rate limiting via Redis (`@upstash/ratelimit`) for critical endpoints (5/36 files migrated). Ownership verification on all resource access. CSRF protection via `verifyOrigin()` on ALL state-changing POST endpoints.
 
-**Payment Security:**
-- PaymentIntent IDs NEVER accepted from client — always read from database
-- Stripe error details not exposed to clients
-- Webhook user lookup is paginated (not full table scan)
-- Auto-resend capped at 3 attempts per booking
+**Token Security:** OAuth tokens encrypted with AES-256-GCM (MANDATORY). Cron jobs via `verifyCronSecret()`. Internal calls via `verifyInternalSecret()`. Token enumeration prevented via `constantTimeDelay()`. Server-side 24h confirmation token expiration. Google Calendar tokens auto-refresh with expiry tracking.
 
-**Input Sanitization:**
-- `sanitizeString()` - General input sanitization
-- `sanitizeForSMS()` - SMS-specific sanitization (removes Unicode direction overrides, zero-width chars)
+**Payment Security:** PaymentIntent IDs NEVER accepted from client — always read from database. All payments go through connected accounts. Stripe error details not exposed. Auto-resend capped at 3 attempts per booking. Failed authorization attempts tracked.
 
-**Production Hardening:**
-- Test endpoints return 404 in production
-- `devLog()` suppresses sensitive logging in production
-- Error details not exposed in redirect URLs or API responses
-- SMS mock provider returns failure in production (prevents silent delivery failures)
-- Debug data removed from Google status endpoint
-- Cron routes only accept POST (GET handlers removed)
+**Input Sanitization:** `sanitizeString()` for general input applied to all user-controlled text (business names, display names, settings). `sanitizeForSMS()` for SMS (removes Unicode direction overrides, zero-width chars).
 
-**Headers & CSP:**
-- Security headers applied in `middleware.ts`
-- Strict CSP (no unsafe-eval)
-- HSTS enabled in production
-- X-Frame-Options: DENY
+**Production Hardening:** Test endpoints return 404 in production. `devLog()` suppresses sensitive logging. SMS mock returns failure in production. Cron routes POST-only with secret auth. Sentry error tracking configured. Webhook idempotency via `stripe_webhook_events` table using atomic INSERT operations.
 
-**Key Security Files:**
-- `lib/auth.ts` - Authentication, authorization, CSRF, OAuth state
-- `lib/validation.ts` - Input validation, rate limiting, sanitization, timing protection, `isValidCalendarEventId()`
-- `lib/encryption.ts` - Token encryption utilities
-- `middleware.ts` - Security headers, CSP
+**Headers & CSP:** Security headers in `middleware.ts`. Strict CSP (no unsafe-eval). HSTS enabled. X-Frame-Options: DENY. TODO: Replace 'unsafe-inline' with nonces for better security.
 
 ### Security Rules
-- Never trust client input
+- Never trust client input - all inputs sanitized
 - All critical logic server-side
-- High security by default
 - All secrets via environment variables (never NEXT_PUBLIC_)
-- Calendar data must be isolated per user
+- Calendar data isolated per user via RLS policies
+- Webhook signature verification mandatory
+- Rate limiting on all public endpoints (Redis-based for production)
+- Row Level Security enabled on all tables (users cannot access others' data)
+- GDPR compliance: data export and account deletion with 7-year financial record retention
 
-### Charging Prerequisites (NON-NEGOTIABLE)
+### Key Security Files
+- `lib/auth.ts` - Authentication, authorization, CSRF, OAuth state
+- `lib/validation.ts` - Input validation, rate limiting, sanitization, timing protection
+- `lib/encryption.ts` - Token encryption utilities
+- `lib/rateLimit.ts` - Redis-based rate limiting (Upstash)
+- `middleware.ts` - Security headers, CSP, admin auth
 
-No booking may ever be charged without ALL of the following:
-1. Confirmation was sent to customer
-2. Customer completed Stripe authorization
-3. Business manually clicked "Mark no-show"
+### Security Audit & Hardening (2026-02-11)
 
-If any prerequisite is missing, charge MUST fail.
+**Trigger:** Supabase security alert reporting 9 critical errors.
+
+**Root Cause:** Missing Row Level Security (RLS) policies allowed any authenticated user to read/modify all data across all users.
+
+**Resolution:** Comprehensive security hardening addressing 17 vulnerabilities across all severity levels.
+
+**Key Fixes:**
+1. **RLS Implementation** - Migration `005-enable-rls-EXISTING-TABLES-ONLY.sql` enables user-scoped policies on 8 core tables
+2. **Webhook Idempotency** - Atomic INSERT operations prevent race conditions in `app/api/stripe/webhook/route.ts`
+3. **Input Sanitization** - `sanitizeString()` applied to business names, display names, all user-controlled text
+4. **CSRF Hardening** - `verifyInternalSecret()` now required for internal API calls (`verifyOrigin()` alone was insufficient)
+5. **Rate Limiting** - Redis migration started (5 critical endpoints completed, 31 remaining documented in `RATE_LIMITING_MIGRATION.md`)
+6. **GDPR Endpoints** - `app/api/profile/export` and `app/api/profile/delete` with 7-year financial retention
+7. **Stripe Connect Auth** - `/connect/onboard`, `/connect/return`, `/connect/refresh` now require `verifyUserAccess()`
+
+**Deployment Status:** All CRITICAL and HIGH priority fixes deployed to production. MEDIUM/LOW priority improvements documented.
+
+**Documentation:**
+- `SECURITY_FIXES_SUMMARY.md` - Complete vulnerability list, fixes, deployment checklist
+- `RATE_LIMITING_MIGRATION.md` - Guide for completing Redis migration on 31 remaining files
+- `RLS_DEPLOYMENT_STEPS.md` - Step-by-step RLS deployment guide with verification queries
+
+**Verification:**
+```sql
+-- Check RLS enabled on all tables
+SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname = 'public';
+-- All should show rowsecurity = true
+
+-- Check policies exist
+SELECT schemaname, tablename, policyname FROM pg_policies WHERE schemaname = 'public';
+-- Should see multiple policies per table
+```
 
 ---
 
-## 13. Email System (Implemented 2026-02-06)
+## 10. Email System
 
-### Email Provider
 - **Provider:** Resend (via `RESEND_API_KEY`)
-- **Templates:** React Email (`@react-email/components`)
-- **Location:** `emails/` directory
-
-### Email Templates (6 total)
+- **Templates:** React Email (`@react-email/components`) in `emails/` directory
+- **Deliverability:** Webhook handlers for bounces, complaints, delivery status
 
 | Template | File | Triggered By |
 |----------|------|--------------|
 | Booking Confirmation | `BookingConfirmation.tsx` | Dashboard "Send Confirmation" |
 | Booking Reminder | `BookingReminder.tsx` | Cron job (24h before, Pro only) |
 | No-Show Receipt | `NoShowReceipt.tsx` | "Mark no-show" action |
+| Refund Issued | `RefundIssued.tsx` | "Issue Refund" action |
 | Welcome Starter | `WelcomeStarter.tsx` | Free signup |
 | Welcome Pro | `WelcomePro.tsx` | Stripe checkout complete |
 | Usage Warning | `UsageWarning.tsx` | Cron job (at 25/30) |
+| Account Verified | `AccountVerified.tsx` | Stripe Connect onboarding complete |
+| Account Restricted | `AccountRestricted.tsx` | Stripe account restricted |
+| Dispute Created | `DisputeCreated.tsx` | Chargeback filed |
+| Calendar Disconnected | `CalendarDisconnected.tsx` | Google token expired |
 
-### Email Functions (`lib/email.ts`)
+**Email Branding:**
+- **Starter**: "via Attenda" footer, Attenda branding
+- **Pro**: Optional white-label (business name, business logo, remove Attenda branding)
 
-```typescript
-sendBookingConfirmation({ to, businessName, clientName, ... })
-sendBookingReminder({ to, businessName, hoursUntil, ... })
-sendNoShowReceipt({ to, chargeAmount, last4, cardBrand, ... })
-sendWelcomeEmail({ to, userName, plan: "starter" | "pro" })
-sendUsageWarning({ to, userName, currentUsage, limit })
-```
-
-### Cron Jobs for Email
-
-| Cron | Schedule | Purpose |
-|------|----------|---------|
-| `/api/cron/send-reminders` | Hourly (disabled) | 24h reminders (Pro only) |
-| `/api/cron/check-usage` | Daily 9am (disabled) | Usage warnings at 25/30 |
-
-**Note:** Cron schedules removed from `vercel.json` (2026-02-06) due to Vercel Hobby plan limitations (once/day max). Routes still work via POST with `CRON_SECRET` auth — need external scheduler or Vercel Pro plan to re-enable.
-
-### Test Endpoint
-- `GET /api/test/emails` - Sends all 6 templates to test address (dev only)
-
-### Email Requirements
-- Feel premium
-- Be legally safe
-- Be very clear
+**Cron jobs** (`/api/cron/send-reminders`, `/api/cron/check-usage`, `/api/cron/check-expiring-authorizations`, `/api/cron/cleanup-old-data`): Routes work via POST with `CRON_SECRET` auth. Need external scheduler (Vercel Hobby plan limitation).
 
 ---
 
-## 14. Landing Page (Redesigned 2026-02-01, Animations 2026-02-06)
+## 11. Landing Page
 
-Premium DataPulse-inspired design with animated charts and extended content.
-
-### Framer Motion Animations (Added 2026-02-06)
-- **Header nav links** - Animated underline on hover (indigo blue)
-- **Hero buttons** - Subtle scale/lift on hover
-- **Features cards** - Orange hover effect with icon color change and card lift
-- **Use Cases cards** - Orange hover effect matching Features
-- **Trust Badges** - Orange hover with icon wiggle animation
-- **FAQ accordion** - Smooth height animation with AnimatePresence
-- **How It Works** - Step entrance animations with stagger
-- **Accessibility** - `prefers-reduced-motion` support via `usePrefersReducedMotion` hook
-
-### Header (Glassmorphism Design)
-- Floating glassmorphism style with backdrop blur and subtle indigo border
-- Logo with "Attenda" text in brand indigo color on the left
-- Centered navigation: Features, Blog, Pricing
-- Right side: Theme toggle, Sign In link, "Start Free Trial" button
-- Mobile: Hamburger menu with slide-in panel containing:
-  - Logo + theme toggle + close button in header
-  - Navigation links (Features, Pricing, Blog)
-  - Sign In and Start Free Trial buttons at bottom
-
-### Cookie Consent
-- Minimal Vercel-style notification at bottom center
-- Appears after 1.5s delay for better UX
-- Glassmorphism card with "Accept" (indigo) and "Decline" buttons
-- Links to Privacy Policy
-- Saves preference to localStorage
-- Responsive: horizontal on desktop, stacked on mobile
-- Component: `app/(landing)/components/CookieConsent.tsx`
+Premium DataPulse-inspired design with Framer Motion animations and `prefers-reduced-motion` support.
 
 ### Sections (in order)
-1. **Header** - Floating glassmorphism nav with centered links
-2. **Hero** - Split layout: text left (badge, gradient heading, CTAs), animated revenue chart right with floating metrics (Show-up Rate, Recovered, No-Show Drop)
-3. **How It Works** - 4-step numbered flow (Connect → Protection → Confirm → Protected)
-4. **Features** - 6-card grid with icons (Calendar Sync, Auto Confirmations, Protection, Payments, Reminders, Rules)
-5. **Dashboard Preview** - Analytics mockup with metrics and charts
+1. **Header** - Floating glassmorphism nav with centered links (Features, Blog, Pricing)
+2. **Hero** - Split layout: text left, animated revenue chart right with floating metrics (no arrows on buttons)
+3. **How It Works** - 4-step numbered flow
+4. **Features** - 6-card grid with icons
+5. **Dashboard Preview** - Analytics mockup
 6. **Use Cases** - 4 cards (Salons, Medical, Consultants, Restaurants)
 7. **Pricing** - 3-tier cards (Starter/Pro/Business)
-8. **FAQ** - 7-question accordion with aria-controls
-9. **Testimonials** - 3 customer quotes with avatars
+8. **FAQ** - 7-question accordion
+9. **Testimonials** - 3 customer quotes
 10. **Trust Badges** - Stripe, GDPR, Uptime, Setup
 11. **Final CTA** - Dark section with gradient background
-12. **Footer** - 5-column layout (Brand, Product, Company, Resources, Legal)
+12. **Footer** - 5-column layout (X, Reddit, YouTube, Facebook social links)
+
+### Cookie Consent
+- Minimal Vercel-style notification, 1.5s delay, saves to localStorage
+- Component: `app/(landing)/components/CookieConsent.tsx`
 
 ### Key Components
-- `app/(landing)/components/Header.tsx` - Glassmorphism floating header with centered nav
-- `app/(landing)/components/MobileMenu.tsx` - Slide-in mobile menu with CTAs
-- `app/(landing)/components/ThemeToggle.tsx` - Light/dark mode toggle
-- `app/(landing)/components/CookieConsent.tsx` - Minimal cookie notification
-- `app/(landing)/components/Hero.tsx` - Animated canvas chart showing revenue impact
-- `app/(landing)/components/HowItWorks.tsx` - Step-by-step flow
-- `app/(landing)/components/Features.tsx` - Feature grid with SVG icons
-- `app/(landing)/components/DashboardPreview.tsx` - Analytics mockup with mini charts
-- `app/(landing)/components/UseCases.tsx` - Business type cards
-- `app/(landing)/components/FAQ.tsx` - Collapsible accordion
-- `app/(landing)/components/Testimonials.tsx` - Customer quotes
-- `app/(landing)/components/TrustBadges.tsx` - Security/trust indicators
-- `app/(landing)/components/FinalCTA.tsx` - Dark CTA section
+All in `app/(landing)/components/`: `Header.tsx`, `MobileMenu.tsx`, `ThemeToggle.tsx`, `CookieConsent.tsx`, `Hero.tsx`, `HowItWorks.tsx`, `Features.tsx`, `DashboardPreview.tsx`, `UseCases.tsx`, `FAQ.tsx`, `Testimonials.tsx`, `TrustBadges.tsx`, `FinalCTA.tsx`
 
 ---
 
-## 15. Social Proof & Marketing
+## 12. Blog & SEO
 
-**Note:** SocialProof counter section was removed from the landing page (2026-02-06) — user found the counter stats unprofessional. The Hero section's floating chart metrics (Show-up Rate, Recovered, No-Show Drop) are separate and were kept.
-
----
-
-## 16. Blog & SEO (Complete 2026-02-07)
-
-### Blog Articles (9 SEO-optimized articles)
-1. **The True Cost of No-Shows** (`/blog/true-cost-of-no-shows`) — 2026-01-28
-2. **Why Clients Don't Show Up** (`/blog/why-clients-dont-show-up`) — 2026-01-25
-3. **5 Strategies to Reduce No-Shows** (`/blog/5-strategies-reduce-no-shows`) — 2026-01-22
-4. **The Card Authorization Solution** (`/blog/card-authorization-solution`) — 2026-01-18
-5. **No-Show Policy Best Practices** (`/blog/no-show-policy-best-practices`) — 2026-01-15
-6. **No-Show Statistics 2026** (`/blog/no-show-statistics-2026`) — 2026-02-01
-7. **How to Communicate Your No-Show Policy** (`/blog/communicate-no-show-policy`) — 2026-01-30
-8. **The ROI of No-Show Protection** (`/blog/no-show-protection-roi`) — 2026-01-26
-9. **Automated Reminders vs Manual Follow-ups** (`/blog/automated-reminders-vs-manual`) — 2026-01-20
-
-### Blog Features
-- SEO metadata on each article (title, description, keywords, OpenGraph, Twitter)
-- BlogPosting JSON-LD schema on all 9 articles (`app/blog/components/BlogPostingSchema.tsx`)
-- Professional SVG illustrations and charts
-- Responsive design matching landing page aesthetic
-- "Back to Blog" navigation + ArticleNavigation component
-- CTA sections linking to sign-up
-- Blog index page at `/blog` with article cards
-
-### SEO Infrastructure (Added 2026-02-07)
-
-| Feature | File | Details |
-|---------|------|---------|
-| Google Search Console | `app/layout.tsx` | Verified via meta tag |
-| Bing Webmaster Tools | — | Submitted via Bing portal |
-| Sitemap | `app/sitemap.ts` | 18 URLs with real publish dates |
-| robots.txt | `public/robots.txt` | Allows all, disallows private routes |
-| llms.txt | `public/llms.txt` | AI search engine summary (ChatGPT, Perplexity, Claude) |
-| OG Images | `app/opengraph-image.tsx` | Dynamic generation for homepage |
-| Twitter Images | `app/twitter-image.tsx` | Dynamic generation for homepage |
-| Blog OG Image | `app/blog/opengraph-image.tsx` | Dynamic generation for blog index |
-| SoftwareApplication Schema | `app/layout.tsx` | JSON-LD with pricing and rating |
-| Organization Schema | `app/layout.tsx` | JSON-LD with name, URL, logo, contact |
-| FAQPage Schema | `app/layout.tsx` | JSON-LD with all 7 FAQ questions |
-| BlogPosting Schema | `app/blog/components/BlogPostingSchema.tsx` | JSON-LD on all 9 articles |
-| Canonical URLs | `app/layout.tsx` | Via `metadataBase` + `alternates.canonical` |
-| OpenGraph Meta | `app/layout.tsx` + all pages | Title, description, type, locale |
-| Twitter Card Meta | `app/layout.tsx` + all pages | `summary_large_image` cards |
-| Robots Meta | `app/layout.tsx` | index/follow with googleBot config |
-
-### Structure
-- Blog link: Header nav (desktop), Hamburger menu (mobile), Footer
-- Clean URLs with descriptive slugs
-- Meta tags and accessibility best practices
+- 9 SEO-optimized articles at `/blog/*` with BlogPosting JSON-LD schema
+- Blog index at `/blog` with article cards
+- SEO infrastructure: Google Search Console, Bing, sitemap (`app/sitemap.ts`), `robots.txt`, `llms.txt`, dynamic OG images, Organization/FAQPage/SoftwareApplication JSON-LD schemas, canonical URLs
+- Blog link in: Header nav (desktop), hamburger menu (mobile), Footer
 
 ---
 
-## 17. UI/UX Rules
+## 13. Calendar Integrations
 
-- Premium, minimal, calm
-- No clutter
-- Starter feels complete but limited
-- Pro feels clearly more powerful
-- Visual affordances for Pro-only features
-
----
-
-## 18. Environment Variables
-
-Required in `.env.local` (all configured in Vercel):
-
-**Supabase:**
-- `NEXT_PUBLIC_SUPABASE_URL`
-- `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY`
-
-**Google OAuth:**
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_REDIRECT_URI` (https://attenda.app/api/google/callback)
-
-**Email/SMS:**
-- `RESEND_API_KEY`
-- `EMAIL_FROM`
-- `SMS_PROVIDER` (currently "mock")
-- `SMS_FROM`
-
-**Security:**
-- `CRON_SECRET` - For cron job authentication
-- `OAUTH_STATE_SECRET` - For OAuth CSRF protection
-- `INTERNAL_API_SECRET` - For server-to-server API calls
-- `TOKEN_ENCRYPTION_KEY` - 64 hex chars for AES-256-GCM OAuth token encryption
-
-**App:**
-- `NEXT_PUBLIC_APP_URL` (https://attenda.app)
-
-**Stripe (Implemented 2026-02-05):**
-- `STRIPE_SECRET_KEY` - Stripe secret key (sk_live_xxx or sk_test_xxx)
-- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` - Stripe publishable key (pk_live_xxx or pk_test_xxx)
-- `STRIPE_WEBHOOK_SECRET` - Webhook signing secret (whsec_xxx)
-- `STRIPE_PRO_PRICE_ID` - Price ID for Pro subscription (price_xxx)
-
-**⚠️ IMPORTANT: Vercel Environment Variable Gotcha**
-When pasting values into Vercel environment variables, invisible newline characters often get included at the end. This causes cryptic errors like `invalid_client` or validation failures. Always:
-1. After pasting, press **End** then **Backspace** to remove trailing newlines
-2. Or delete and re-type the value manually
-3. Check the debug endpoint `/api/debug/google-config` to verify no newlines
+- **Implemented**: Google Calendar (OAuth2 with token refresh)
+- **Future**: Apple Calendar, Microsoft Outlook Calendar
+- Architecture must be provider-agnostic
+- Token refresh implemented with expiry tracking
+- Auto-disconnect on `invalid_grant` errors
+- Email notifications on disconnection
 
 ---
 
-## 19. Implementation Status (Updated 2026-02-08)
+## 14. Database
 
-### ✅ Complete (Working in Production)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| **Deployed to Vercel** | 100% | Live at attenda.app |
-| **Authentication** | 100% | Magic links + Google OAuth via Supabase |
-| **Security Hardening** | 100% | Full audit completed, all issues fixed |
-| **Landing Page** | 100% | Full redesign with animated charts, 13 sections |
-| **Header** | 100% | Glassmorphism floating nav, centered links, mobile menu |
-| **Blog Section** | 100% | 9 SEO articles with illustrations |
-| **Cookie Consent** | 100% | Minimal Vercel-style notification |
-| **Google Calendar Integration** | 100% | OAuth2, event sync, encrypted token storage |
-| **Dashboard** | 100% | Sidebar nav, event filters, click-to-add, segment controls, no-show modal (2026-02-08) |
-| **Settings Page** | 100% | Plan display, Pro features, subscription management, segment controls |
-| **Optimistic UI** | 100% | Instant updates, rollback on failure, visible toast notifications |
-| **Stripe Integration** | 100% | Subscriptions, card auth, no-show charging (2026-02-05) |
-| Booking Management | 95% | Draft → Pending → Confirmed flow |
-| No-Show Rules (Global) | 95% | Settings page working |
-| Monthly Limits (Starter) | 90% | Counter, limits enforced |
-| Plan System | 100% | Starter/Pro via Stripe subscriptions |
-| **Email System** | 100% | 6 React Email templates, cron jobs for reminders/warnings |
-| ~~Social Proof Counters~~ | REMOVED | Section removed from landing page (2026-02-06) |
-| **Mobile Touch Targets** | 100% | WCAG 2.5.5 compliant (44px minimum) |
-| **Dark Mode** | 100% | Full support including mobile safe areas |
-| **Accessibility** | 95% | ARIA attributes, status icons, loading states |
-| **SEO & Search Indexing** | 100% | Google Search Console, Bing, structured data, OG images, llms.txt |
-
-### 💳 Stripe Features (Implemented 2026-02-05)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| Pro Subscriptions | ✅ | Stripe Checkout for €39/month subscription |
-| Guest Checkout | ✅ | New users can buy Pro directly from landing page (no login required) |
-| Customer Portal | ✅ | Manage subscription via Stripe portal |
-| Card Authorization | ✅ | PaymentIntent with manual capture on confirmation |
-| No-Show Charging | ✅ | Captures authorized amount on "Mark no-show" |
-| Authorization Release | ✅ | Voids authorization on "Mark attended" |
-| Webhook Handlers | ✅ | Handles subscription, checkout, and payment events |
-| Auto Account Creation | ✅ | Webhook creates user account after guest checkout via Supabase invite |
-| Stripe Charges Audit | ✅ | All Stripe operations logged to stripe_charges table |
-
-**Pro Signup Flows:**
-
-| From | Flow |
-|------|------|
-| Landing page (new user) | Get Pro → Stripe Checkout → `/welcome` page → Magic link email → Dashboard |
-| Dashboard (existing user) | Upgrade to Pro → Stripe Checkout → Settings page with success message |
-
-### 🔒 Security Features (Updated 2026-02-06, Audit #2 Complete)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| API Authentication | ✅ | All routes use verifyUserAccess() |
-| OAuth Token Encryption | ✅ | AES-256-GCM mandatory (fails if key missing) |
-| Internal API Secret | ✅ | Server-to-server calls authenticated |
-| CSRF Protection | ✅ | verifyOrigin() on ALL state-changing POST endpoints |
-| Rate Limiting | ✅ | All endpoints protected (in-memory, Redis recommended) |
-| Input Validation | ✅ | UUID + calendarEventId validation, sanitization |
-| SMS Injection Prevention | ✅ | sanitizeForSMS() removes control/Unicode chars |
-| CSP Headers | ✅ | Strict policy in middleware.ts |
-| Timing-Safe Comparisons | ✅ | All secret comparisons |
-| Token Enumeration Prevention | ✅ | constantTimeDelay() on token lookups |
-| Event Time Validation | ✅ | Cannot mark attendance before event starts |
-| Rule Locking | ✅ | Protection rules locked after confirmation sent |
-| Channel Detection | ✅ | Auto-detect email vs SMS from contact format |
-| Stripe Webhook Verification | ✅ | Signature verification on all webhooks |
-| Stripe Checkout Auth | ✅ | Mandatory authentication (no bypass) |
-| PaymentIntent Protection | ✅ | Never accepts client-supplied PaymentIntent IDs |
-| Server-Side Token Expiry | ✅ | 24h confirmation token expiration enforced server-side |
-| Auto-Resend Limit | ✅ | Max 3 resend attempts per booking |
-| SMS Production Safety | ✅ | Mock SMS returns failure in production |
-| Debug Data Removed | ✅ | Google status endpoint no longer exposes token info |
-| Cron Route Hardening | ✅ | GET handlers removed, POST-only with secret auth |
-| Test Endpoints Blocked | ✅ | /api/test/* returns 404 in production |
-| Production Logging | ✅ | Sensitive logs suppressed via devLog() |
-
-### 🐛 Known Dashboard Bugs (Identified 2026-02-06)
-
-| Bug | Priority | Status | Description |
-|-----|----------|--------|-------------|
-| ~~5-second login timeout~~ | 🔴 CRITICAL | ✅ FIXED | Increased to 60s timeout |
-| ~~Hardcoded protection values~~ | 🔴 HIGH | ✅ FIXED | Now fetches from no_show_settings table |
-| ~~Dark mode status badges~~ | 🟡 MEDIUM | ✅ FIXED | Dark mode CSS overrides with proper contrast |
-| ~~Resend label calculation~~ | 🟡 MEDIUM | ✅ FIXED | Now based on lastSentAt + 24h |
-| ~~Optimistic UI no rollback~~ | 🟡 MEDIUM | ✅ FIXED | Toast notifications + state rollback on failure |
-| ~~Missing ARIA live regions~~ | 🟡 MEDIUM | ✅ FIXED | Added role="status" for action feedback |
-| ~~Touch targets too small~~ | 🟡 MEDIUM | ✅ FIXED | min-height: 44px on all dashboard buttons |
-
-### ⚠️ Partial (Needs Work)
-
-| Feature | Status | Notes |
-|---------|--------|-------|
-| No-Show Rules (Per-Event) | 85% | API + inline editing wired via `/api/no-show/override`, modal UI not needed |
-| SMS Capability | 40% | Channel detection works, mock provider only (fails in prod) |
-| Distributed Rate Limiting | 0% | Needs Upstash Redis for production scale (in-memory per isolate) |
-| Dashboard Bug Fixes | 100% | All 7 bugs fixed including optimistic rollback |
-| SSR Rate Limiting | 0% | Confirm page needs rate limiting via middleware |
-| Nonce-Based CSP | 0% | Recommended but requires significant Next.js config changes |
-| Vercel Cron Jobs | 0% | Removed for Hobby plan; needs Pro plan or external scheduler |
-
-### ❌ Not Started
-
-| Feature | Priority | Notes |
-|---------|----------|-------|
-| SMS Provider Connection | 🟠 MEDIUM | Twilio/Telnyx integration |
-| Multi-Calendar Support | 🟠 MEDIUM | Flags exist, no implementation |
-| Apple/Outlook Calendar | 🟠 MEDIUM | OAuth designed, not built |
-| Currency Handling (EUR/USD) | 🔵 LOW | Only EUR currently |
-
----
-
-## 20. Prioritized Next Steps
-
-### ~~Phase 1: Payment System~~ ✅ COMPLETE (2026-02-05)
-
-Stripe integration is fully implemented:
-- ✅ Stripe SDK installed
-- ✅ Environment variables configured
-- ✅ Stripe customer creation on checkout
-- ✅ Pro subscription via Stripe Checkout
-- ✅ Card authorization on confirmation page (Stripe Payment Element)
-- ✅ No-show charging (captures authorized payment)
-- ✅ Webhook handlers for all events
-- ✅ Customer portal for subscription management
-
-### ~~Phase 2: Dashboard Bug Fixes~~ ✅ COMPLETE (2026-02-07)
-
-1. ~~**Fix 5-second timeout**~~ ✅ Increased to 60s
-2. ~~**Load real protection values**~~ ✅ Fetches from no_show_settings table (default €20)
-3. ~~**Fix dark mode status badges**~~ ✅ Dark mode CSS overrides with proper contrast
-4. ~~**Fix resend label calculation**~~ ✅ Based on lastSentAt + 24h
-5. ~~**Add ARIA live regions**~~ ✅ role="status" for action feedback
-6. ~~**Fix touch targets**~~ ✅ min-height: 44px on all dashboard buttons
-7. ~~**Optimistic UI rollback**~~ ✅ Toast notifications + state rollback on API failure
-
-### Phase 3: Core Experience Polish
-
-1. ~~**Per-event protection editing**~~ ✅ Complete - Inline editing wired to `/api/no-show/override`
-2. ~~**Premium email templates**~~ ✅ Complete - 6 React Email templates
-3. **SMS provider integration** - Connect Twilio or Telnyx
-4. ~~**Add ARIA live regions**~~ ✅ Complete - role="status" with aria-live="polite"
-
-### ~~Phase 4: Marketing & Growth~~ ✅ COMPLETE (2026-02-07)
-
-1. ~~**Blog section**~~ ✅ Complete - 9 SEO articles with illustrations
-2. ~~**Social proof counters**~~ ✅ Complete - Animated counters implemented (later removed)
-3. ~~**Landing page redesign**~~ ✅ Complete - Full DataPulse-style redesign
-4. ~~**Header redesign**~~ ✅ Complete - Glassmorphism floating nav
-5. ~~**Cookie consent**~~ ✅ Complete - Minimal Vercel-style notification
-6. ~~**Stripe integration**~~ ✅ Complete - Full payment system
-7. ~~**Framer Motion animations**~~ ✅ Complete - Smooth hover effects, FAQ accordion
-8. ~~**SEO & Search Indexing**~~ ✅ Complete - Google Search Console, Bing, structured data, OG images, llms.txt
-
-### Phase 5: Future Features
-
-1. **Multi-calendar support** - Multiple Google calendars per user
-2. **Apple Calendar integration** - OAuth + CalDAV
-3. **Outlook Calendar integration** - Microsoft Graph API
-4. **Currency handling** - EUR for EU, USD for rest of world
-
----
-
-## 21. Database Tables (Complete Reference)
-
-Current tables in use:
+### Tables
 
 | Table | Purpose |
 |-------|---------|
-| `profiles` | User accounts, plan, auto-resend, Stripe customer/subscription IDs |
-| `google_connections` | OAuth tokens per user |
-| `calendar_bookings` | Synced events from calendar |
-| `booking_confirmations` | Confirmation tokens, status, Stripe payment intent, card auth status |
-| `no_show_settings` | Global rules per user |
+| `profiles` | User accounts, plan, Stripe IDs, business info, calendar prefs |
+| `google_connections` | Encrypted OAuth tokens, expiry tracking, status |
+| `calendar_bookings` | Synced events from calendar, currency |
+| `booking_confirmations` | Confirmation tokens, status, Stripe PaymentIntent, card auth status, currency |
+| `no_show_settings` | Global protection rules per user |
 | `appointment_no_show_overrides` | Per-event rule overrides |
 | `appointment_attendance` | Attendance records (attended/no_show) |
-| `stripe_charges` | Audit log for all Stripe authorization/capture/void operations |
+| `stripe_charges` | Audit log for all Stripe operations, currency |
+| `stripe_refunds` | All refunds (full/partial), reason tracking |
+| `stripe_disputes` | Chargebacks, evidence due dates, status |
+| `stripe_webhook_events` | Idempotency log, retry tracking, error logging |
+| `stripe_account_updates` | Stripe Connect account status changes |
+| `business_onboarding_logs` | Onboarding flow tracking |
+| `payment_authorization_failures` | Failed auth attempts, error codes |
+| `sms_logs` | SMS delivery status, cost tracking (to be implemented) |
 
-**Stripe-related columns (added 2026-02-05):**
+### Notable `profiles` columns
+- `stripe_customer_id`, `stripe_subscription_id`, `subscription_status`
+- `stripe_account_id`, `stripe_account_status`, `onboarding_completed`
+- `business_name`, `business_address`, `business_country`, `business_vat`, `business_type`
+- `white_label_enabled`, `business_logo_url` (Pro features)
+- `week_start_day`, `time_format`, `timezone`
+- `menu_position`, `display_name`
+- `currency` (derived from business_country)
+- `deleted_at` (soft delete for GDPR)
+- **No `email` column** — get email from `user` object
 
-`profiles` table:
-- `stripe_customer_id` - Stripe customer ID
-- `stripe_subscription_id` - Active subscription ID
-- `subscription_status` - Status (active, canceled, past_due, etc.)
+### Notable `google_connections` columns
+- `encrypted_access_token`, `encrypted_refresh_token`
+- `token_expires_at`, `status` ('connected' | 'disconnected')
+- `google_email`
 
-`booking_confirmations` table:
-- `stripe_payment_intent_id` - PaymentIntent for card authorization
-- `card_authorized` - Boolean, true when card auth completed
-- `card_authorized_at` - Timestamp of authorization
-- `charge_captured` - Boolean, true when no-show fee charged
-- `charge_captured_at` - Timestamp of charge
+### Notable `booking_confirmations` columns
+- `stripe_payment_intent_id`, `card_authorized`, `card_authorized_at`
+- `charge_captured`, `charge_captured_at`
+- `currency`
 
-**Migration file:** `migrations/stripe-integration.sql` (run in Supabase SQL Editor)
+### Migrations (run in Supabase SQL Editor)
+All migrations in `migrations/` directory.
 
-**Calendar preferences columns (added 2026-02-08):**
+**✅ Deployed:**
+- `005-enable-rls-EXISTING-TABLES-ONLY.sql` - Row Level Security on 8 core tables (2026-02-11)
 
-`profiles` table:
-- `week_start_day` - INTEGER DEFAULT 1 (0=Sunday, 1=Monday)
-- `time_format` - TEXT DEFAULT '24h' ('24h' or '12h')
+**📋 Planned (not yet run):**
+- `001-stripe-connect.sql` - Stripe Connect fields
+- `002-multi-currency.sql` - Currency support
+- `003-refunds-disputes.sql` - Refund/dispute tracking
+- `004-webhook-idempotency.sql` - Webhook event logging (partial - table exists, not from migration)
+- `token-refresh.sql` - Google token expiry tracking
+- `data-retention.sql` - GDPR compliance fields
 
-**Migration file:** `migrations/calendar-preferences.sql` (run in Supabase SQL Editor)
-
-**Navigation preference column (added 2026-02-08):**
-
-`profiles` table:
-- `menu_position` - TEXT DEFAULT 'sidebar' ('sidebar' or 'header')
-
-**Migration file:** `migrations/menu-position.sql` (run in Supabase SQL Editor)
+**⚠️ Important:** When running migrations 001-004, you'll need to update the RLS migration to include the new tables (stripe_refunds, stripe_disputes, stripe_webhook_events, etc.). Use `005-enable-rls-policies-SAFE-RERUN.sql` as template.
 
 ---
 
-## 22. Goal
+## 15. Environment Variables
 
-Building a real SaaS with real money and real customers.
+Required in `.env.local` (all configured in Vercel):
 
-**Optimize for:**
-- Trust
-- Correctness
-- Security
-- Long-term maintainability
-- Premium perception
+**Supabase:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
+
+**Google OAuth:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
+
+**Email:** `RESEND_API_KEY`, `EMAIL_FROM`
+
+**SMS (to be implemented):** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `SMS_PROVIDER` (twilio)
+
+**Security:** `CRON_SECRET`, `OAUTH_STATE_SECRET`, `INTERNAL_API_SECRET`, `TOKEN_ENCRYPTION_KEY` (64 hex chars), `ADMIN_EMAILS` (comma-separated)
+
+**App:** `NEXT_PUBLIC_APP_URL` (https://attenda.app)
+
+**Stripe:**
+- `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`
+- `STRIPE_PRO_PRICE_ID_EUR`, `STRIPE_PRO_PRICE_ID_USD`
+
+**Redis (Upstash):** `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+
+**Monitoring:** `NEXT_PUBLIC_SENTRY_DSN`, `SENTRY_AUTH_TOKEN`
+
+**Stripe webhook events required:**
+- Subscriptions: `checkout.session.completed`, `customer.subscription.*`, `invoice.payment_*`
+- Payments: `payment_intent.succeeded`, `payment_intent.canceled`, `payment_intent.payment_failed`, `charge.captured`
+- Disputes: `charge.dispute.created`, `charge.dispute.updated`, `charge.dispute.closed`, `charge.dispute.funds_withdrawn`
+- Connect: `account.updated`, `account.external_account.*`, `capability.updated`
 
 ---
 
-## 23. Critical Reminders
+## 16. Production Readiness Status
 
-- **Dashboard UI polish** (2026-02-08) — Sidebar: Pro badge next to logo, account email in bottom, icon-only theme toggle. Calendar: past days locked/dimmed, week view allDaySlot removed, 24h/12h respected in slot labels, select handler for reliable week click-to-create, month title centered with fade animation, scroll-to-top button. Settings: Plan card merged into Account card, No-Show Policy same style as other cards with "Edit" button, Calendar Preferences stacked layout, consistent `--color-bg-card` and font variables. Login: Welcome Back animation removed. Mobile: DashboardHeader fallback shown when sidebar mode active (<900px).
-- **Dashboard UX overhaul** (2026-02-08) — Collapsible sidebar nav (desktop >=900px), Upcoming/Past event filter tabs, click-to-add events (week view includes time pre-fill), iOS-style segment controls in settings, No-Show Policy modal (replaces page navigation), Apple Calendar removed from settings, Today button removed, timezone day-shift bug fixed. Migration: `migrations/menu-position.sql`. Key files: `DashboardContext.tsx`, `Sidebar.tsx`, `NoShowSettingsModal.tsx`
-- **Dashboard calendar redesign** (2026-02-08) — Stacked layout (calendar top, date-grouped events below), scroll-to-date on click, Create Event inside calendar card, calendar preferences (week start, time format) in Settings. Migration: `migrations/calendar-preferences.sql`
-- **SEO & search indexing complete** (2026-02-07) — Google Search Console verified, Bing submitted, structured data (Organization, FAQPage, BlogPosting), OG images, llms.txt
-- **Dashboard bugs ALL fixed** (2026-02-07) — 7/7 bugs fixed including optimistic UI rollback with visible toast notifications
-- **Per-event protection editing wired** (2026-02-07) — Inline editing calls `/api/no-show/override`, tracks overrides in `protectionOverrideMap`
-- **Security audit #2 completed** (2026-02-06) — 13 findings: 2 HIGH, 6 MEDIUM, 5 LOW/INFO. 10 fixed, 3 deferred (see below)
-- **Deferred security items**: (1) Rate limiting on SSR confirm page — needs middleware approach, (2) Distributed rate limiting — needs Upstash Redis, (3) Nonce-based CSP — needs large Next.js config change
-- **Vercel cron jobs removed** (2026-02-06) — `vercel.json` emptied because Hobby plan limits crons to once/day. Cron schedules need external trigger (e.g., Vercel Cron on Pro plan or external scheduler)
-- **SocialProof section removed** (2026-02-06) — Counter stats removed from landing page (not professional)
-- **Skeleton loading states** (2026-02-06) — Dashboard shows skeleton cards instead of spinner during load
-- **Default no-show fee is €20** (2000 cents) — not €30 as was previously hardcoded
-- **Email system complete** (2026-02-06) — 6 React Email templates, run `migrations/email-system.sql` in Supabase
-- **Landing page animations added** (2026-02-06) — Framer Motion hover effects, FAQ accordion
-- **Upgrade to Pro button** (2026-02-06) — Added to Starter dashboard header
-- **Stripe integration complete** (2026-02-05) — subscriptions, card auth, and no-show charging all working
-- **Site is LIVE** at https://attenda.app — deployed on Vercel
-- **Calendar protection logic hardened** (2026-02-05) — event time validation, rule locking, channel detection
-- OAuth tokens are now encrypted with AES-256-GCM
-- **Google Calendar OAuth working** (2026-02-04) — login + calendar connection both functional
-- Landing page complete (2026-02-01) — glassmorphism header, 13 sections, indigo/teal color scheme
-- Blog complete (2026-02-01) — 9 SEO-optimized articles with professional illustrations
-- Cookie consent implemented — minimal Vercel-style notification with localStorage persistence
-- **Database note:** `profiles` table does NOT have an `email` column — get email from `user` object instead
-- **Run migrations:** Before using Stripe, run `migrations/stripe-integration.sql` in Supabase
-- Never bypass the "manual no-show confirmation" rule — it's legally and ethically critical
-- For production scale: implement Redis-based rate limiting (currently in-memory)
-- **Vercel env vars:** Always check for trailing newlines when pasting (see Section 18)
-- **Stripe env vars required:** `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`
-- **Stripe webhook events required:** `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_succeeded`, `invoice.payment_failed`, `payment_intent.succeeded`, `payment_intent.canceled`, `charge.captured`
+### ✅ Implemented (MVP Complete)
+- Dashboard UI (calendar, events, settings)
+- Google Calendar integration with token refresh
+- Email confirmations via Resend
+- Stripe subscriptions (Starter/Pro)
+- Basic card authorization (NOT on connected accounts yet)
+- Multi-currency UI support
+- Dark/light mode
+- Landing page + blog
+
+### ✅ Security Hardening Complete (2026-02-11)
+**17 vulnerabilities fixed across all severity levels:**
+- **CRITICAL (4)**: Row Level Security enabled on all tables, Stripe Connect endpoints authenticated, webhook idempotency race condition fixed, weak CSRF protection strengthened
+- **HIGH (6)**: Redis rate limiting on critical endpoints, input sanitization, timing leak protection, GDPR data export/delete, email source validation
+- **MEDIUM (5)**: INTERNAL_API_SECRET enforcement, timing-safe secret comparison, admin whitelist, CSP improvements, rate limiting migration guide
+- **LOW (2)**: Environment variable documentation, deployment verification
+
+**See `SECURITY_FIXES_SUMMARY.md` for complete details and deployment checklist.**
+
+### 🔴 CRITICAL - Must Implement Before Launch
+
+| Feature | Priority | Status | Timeline |
+|---------|----------|--------|----------|
+| **Stripe Connect** | CRITICAL | NOT STARTED | 2-3 weeks |
+| Business registration flow | CRITICAL | NOT STARTED | 1 week |
+| Connected account payouts | CRITICAL | NOT STARTED | 1 week |
+| Webhook idempotency | CRITICAL | ✅ COMPLETE | - |
+| Refund handling | CRITICAL | NOT STARTED | 1 week |
+| Dispute/chargeback handling | CRITICAL | NOT STARTED | 1 week |
+| Production monitoring (Sentry) | CRITICAL | NOT STARTED | 2 days |
+| Redis rate limiting | CRITICAL | ⚠️ PARTIAL (5/36 files) | 2 days |
+| Health check endpoint | CRITICAL | NOT STARTED | 1 day |
+| **Row Level Security** | CRITICAL | ✅ COMPLETE | - |
+| **GDPR Compliance** | CRITICAL | ✅ COMPLETE | - |
+
+### 🟡 High Priority - Should Have
+
+| Feature | Priority | Status | Timeline |
+|---------|----------|--------|----------|
+| PaymentIntent expiration handling | HIGH | NOT STARTED | 3 days |
+| Failed authorization retry | HIGH | NOT STARTED | 2 days |
+| Email deliverability tracking | HIGH | NOT STARTED | 2 days |
+| GDPR auto-delete cron | HIGH | NOT STARTED | 2 days |
+| Webhook reconciliation tool | HIGH | NOT STARTED | 3 days |
+| Admin dashboard | HIGH | NOT STARTED | 1 week |
+
+### 🟢 Medium Priority - Nice to Have
+
+| Feature | Priority | Status | Timeline |
+|---------|----------|--------|----------|
+| SMS implementation (Twilio) | MEDIUM | 40% | 1 week |
+| Timezone support | MEDIUM | PLANNED | 3 days |
+| White-label emails (Pro) | MEDIUM | PLANNED | 2 days |
+| Load testing | MEDIUM | NOT STARTED | 3 days |
+| Backup/recovery testing | MEDIUM | NOT STARTED | 2 days |
+
+### Timeline Estimate
+- **Minimum viable launch:** 5-6 weeks (Critical features only)
+- **Production-ready launch:** 7-8 weeks (Critical + High priority)
+- **Full feature set:** 9-10 weeks (All features)
+
+**Recommendation:** Do NOT launch publicly until all CRITICAL features are implemented. Current system has major payment flow gap (no connected accounts = money has nowhere to go).
+
+---
+
+## 17. Important Gotchas
+
+- **CRITICAL**: Stripe Connect is NOT implemented. Current payment flow is incomplete. Money has no destination account. Must implement before launch.
+- **Default no-show fee is €20** (2000 cents) — not €30
+- **`profiles` table has NO `email` column** — get email from `user` object (via `getAuthenticatedUser()`)
+- **RLS Migration Errors**: Tables from unrun migrations (001-004) don't exist yet. Use `005-enable-rls-EXISTING-TABLES-ONLY.sql` which only applies RLS to 8 existing tables.
+- **`appointment_attendance` and `appointment_no_show_overrides`** use `user_id` directly, NOT `booking_id`. RLS policies must use `auth.uid() = user_id`.
+- **Vercel env vars**: invisible newline characters when pasting cause cryptic errors. Press End then Backspace after pasting, or re-type manually.
+- **Timezone dates**: Always use `toLocalDateStr()`, never `toISOString().split("T")[0]`
+- **FullCalendar `dateClick`** unreliable in week timegrid — use `selectable={true}` + `select` handler
+- **CSS variables**: `--color-bg` (#0F172A dark) differs from `--color-bg-card` (#1E293B dark) — always use `--color-bg-card` for card backgrounds
+- **Dark mode**: via `[data-theme="dark"]` selector. Always check dark mode contrast for colored badges.
+- **`<button>` elements reset styles**: when using `<button>` as card, must explicitly set `background` and `border`
+- **Sidebar dark mode nav links**: need explicit `[data-theme="dark"] .sidebar-nav-link` color (#cbd5e1)
+- **Webhook idempotency**: ✅ FIXED - Atomic INSERT operations prevent race conditions. Use `DROP POLICY IF EXISTS` before `CREATE POLICY` for safe re-runs.
+- **PaymentIntent expiry**: Auth expires after 7 days, must renew for bookings >7 days away
+- **Rate limiting**: ✅ PARTIALLY MIGRATED - 5/36 files use Redis. In-memory won't work in serverless. See `RATE_LIMITING_MIGRATION.md`.
+- **Connected accounts**: Never create PaymentIntents on platform account — always use `on_behalf_of` and `transfer_data`
+- **Multi-currency**: Always store currency with amount. Display correct symbol based on user's country.
+- **Google token refresh**: Tokens expire every hour, refresh tokens expire after 6 months inactive. Must handle both.
+- **GDPR**: ✅ IMPLEMENTED - Data export (`/api/profile/export`) and deletion (`/api/profile/delete`) with 7-year financial retention.
+- **Disputes**: Business has limited time to respond with evidence. Track `evidence_due_by` dates.
+- **Skeleton loading states** used in dashboard (not spinner)
+- **SocialProof section removed** from landing page — Hero floating metrics are separate and kept
+
+---
+
+## 18. Development Priorities
+
+**DO NOT START NEW FEATURES.** Focus on production readiness:
+
+1. **Week 1-3:** Stripe Connect implementation (business onboarding, connected accounts, payouts)
+2. **Week 4:** Webhook hardening (idempotency, retry, logging)
+3. **Week 5:** Refund & dispute handling
+4. **Week 6:** Production infrastructure (Sentry, Redis, monitoring, health checks)
+5. **Week 7-8:** Edge cases (payment failures, token refresh, GDPR compliance)
+
+**After production launch:**
+- SMS implementation
+- White-label branding
+- Advanced features (timezone, multi-calendar, API)
+
+See `docs/implementation-plan.md` for detailed breakdown of all tasks.

@@ -1,0 +1,20 @@
+{
+  "name": "attenda-explainer-video",
+  "version": "1.0.0",
+  "description": "Attenda product explainer video built with Remotion",
+  "scripts": {
+    "start": "remotion studio",
+    "build": "remotion render src/index.ts Video out/attenda-explainer.mp4",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "typescript": "^5.0.0"
+  }
+}

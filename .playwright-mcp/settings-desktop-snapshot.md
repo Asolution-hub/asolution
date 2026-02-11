@@ -1,0 +1,107 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e3]:
+      - generic [ref=e4]:
+        - link "Attenda" [ref=e5] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e7]
+          - generic [ref=e10]: Attenda
+        - navigation [ref=e11]:
+          - link "Dashboard" [ref=e12] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Settings" [ref=e13] [cursor=pointer]:
+            - /url: /dashboard/settings
+        - generic [ref=e14]:
+          - generic [ref=e16]:
+            - img [ref=e25]
+            - text: Pro
+          - button "Switch to dark mode" [ref=e17] [cursor=pointer]:
+            - img [ref=e18]
+          - button "Log out" [ref=e20] [cursor=pointer]
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - heading "Settings" [level=1] [ref=e27]
+        - paragraph [ref=e28]: Manage your account, protection rules, and notification preferences.
+      - generic [ref=e29]:
+        - generic [ref=e30]:
+          - generic [ref=e31]:
+            - generic [ref=e32]: Pro
+            - heading "Pro Plan" [level=3] [ref=e33]
+          - generic [ref=e34]:
+            - img [ref=e35]
+            - text: Active
+        - generic [ref=e37]:
+          - generic [ref=e38]:
+            - img [ref=e39]
+            - text: Unlimited appointments
+          - generic [ref=e41]:
+            - img [ref=e42]
+            - text: Email + SMS confirmations
+          - generic [ref=e44]:
+            - img [ref=e45]
+            - text: Per-appointment protection rules
+          - generic [ref=e47]:
+            - img [ref=e48]
+            - text: Auto-resend confirmations
+      - heading "Protection Settings" [level=2] [ref=e50]
+      - generic [ref=e51]:
+        - link "No-Show Policy Configure fees, grace periods, and cancellation windows" [ref=e52] [cursor=pointer]:
+          - /url: /dashboard/settings/no-show
+          - img [ref=e54]
+          - generic [ref=e58]:
+            - generic [ref=e59]: No-Show Policy
+            - generic [ref=e60]: Configure fees, grace periods, and cancellation windows
+          - img [ref=e61]
+        - generic [ref=e63]:
+          - img [ref=e65]
+          - generic [ref=e68]:
+            - generic [ref=e69]: Auto-Resend Confirmations
+            - generic [ref=e70]: Automatically resend if client doesn't confirm within 24h
+          - switch "Auto-resend confirmations" [ref=e71] [cursor=pointer]: "OFF"
+      - heading "Notifications" [level=2] [ref=e72]
+      - generic [ref=e73]:
+        - generic [ref=e74]:
+          - img [ref=e76]
+          - generic [ref=e79]:
+            - generic [ref=e80]: Email Confirmations
+            - generic [ref=e81]: Send booking confirmations via email
+          - switch "Email confirmations" [checked] [disabled] [ref=e82]: "ON"
+        - generic [ref=e83]:
+          - img [ref=e85]
+          - generic [ref=e87]:
+            - generic [ref=e88]: SMS Confirmations
+            - generic [ref=e89]: Send booking confirmations via SMS
+          - switch "SMS confirmations" [ref=e90] [cursor=pointer]: "OFF"
+      - heading "Account" [level=2] [ref=e91]
+      - generic [ref=e92]:
+        - link "Plan & Billing Manage your subscription" [ref=e93] [cursor=pointer]:
+          - /url: /#pricing
+          - img [ref=e95]
+          - generic [ref=e97]:
+            - generic [ref=e98]: Plan & Billing
+            - generic [ref=e99]: Manage your subscription
+          - img [ref=e100]
+        - link "Connected Calendars Manage your calendar connections" [ref=e102] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e104]
+          - generic [ref=e106]:
+            - generic [ref=e107]: Connected Calendars
+            - generic [ref=e108]: Manage your calendar connections
+          - img [ref=e109]
+        - generic [ref=e111]:
+          - img [ref=e113]
+          - generic [ref=e116]:
+            - generic [ref=e117]: Account Email
+            - generic [ref=e118]: niisutavkreem@gmail.com
+      - generic [ref=e119]:
+        - img [ref=e120]
+        - generic [ref=e122]: Your data is encrypted and securely stored. We never share your information with third parties.
+  - alert [ref=e24]
+  - generic [ref=e123]:
+    - paragraph [ref=e124]:
+      - text: We use cookies to improve your experience.
+      - link "Learn more" [ref=e125] [cursor=pointer]:
+        - /url: /privacy
+    - generic [ref=e126]:
+      - button "Decline" [ref=e127] [cursor=pointer]
+      - button "Accept" [ref=e128] [cursor=pointer]

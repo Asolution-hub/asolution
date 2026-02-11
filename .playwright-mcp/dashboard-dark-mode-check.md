@@ -1,0 +1,133 @@
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - banner [ref=e12]:
+      - generic [ref=e13]:
+        - link "Attenda" [ref=e14] [cursor=pointer]:
+          - /url: /dashboard
+          - img [ref=e16]
+          - generic [ref=e19]: Attenda
+        - navigation [ref=e20]:
+          - link "Dashboard" [ref=e21] [cursor=pointer]:
+            - /url: /dashboard
+          - link "Settings" [ref=e22] [cursor=pointer]:
+            - /url: /dashboard/settings
+        - generic [ref=e23]:
+          - generic [ref=e25]:
+            - img [ref=e26]
+            - text: Pro
+          - button "Switch to dark mode" [ref=e28] [cursor=pointer]:
+            - img [ref=e29]
+          - button "Log out" [ref=e31] [cursor=pointer]
+    - main [ref=e32]:
+      - heading "Appointment Dashboard" [level=1] [ref=e33]
+      - generic [ref=e35]:
+        - img [ref=e37]
+        - generic [ref=e39]:
+          - generic [ref=e40]: Pro Plan Active
+          - generic [ref=e41]: SMS confirmations, per-appointment rules
+      - generic [ref=e43]:
+        - generic [ref=e44]:
+          - img [ref=e46]
+          - generic [ref=e48]:
+            - heading "Google Calendar" [level=3] [ref=e49]
+            - generic [ref=e50]:
+              - img [ref=e51]
+              - text: Connected
+        - button "Disconnect" [ref=e53] [cursor=pointer]
+      - generic [ref=e54]:
+        - generic [ref=e55]:
+          - heading "Today" [level=3] [ref=e57]:
+            - img [ref=e58]
+            - text: Today
+          - generic [ref=e61]: No appointments today
+        - generic [ref=e62]:
+          - generic [ref=e63]:
+            - heading "Upcoming" [level=3] [ref=e64]:
+              - img [ref=e65]
+              - text: Upcoming
+            - generic [ref=e67]: "2"
+          - list [ref=e68]:
+            - listitem [ref=e69]:
+              - generic [ref=e70]:
+                - generic [ref=e71]:
+                  - heading "Test1" [level=4] [ref=e72]
+                  - generic [ref=e73]: Draft (confirmation not sent)
+                - generic [ref=e74]:
+                  - generic [ref=e75]:
+                    - img [ref=e76]
+                    - text: Thu, Feb 5
+                  - generic [ref=e78]:
+                    - img [ref=e79]
+                    - text: 11:00 PM
+              - generic [ref=e82]:
+                - img [ref=e83]
+                - generic [ref=e86]: attenda.solution@gmail.com
+              - generic [ref=e87]:
+                - generic [ref=e88]:
+                  - generic [ref=e89]:
+                    - img [ref=e90]
+                    - generic [ref=e92]: No-Show Protection
+                  - button "Edit" [ref=e93] [cursor=pointer]:
+                    - img [ref=e94]
+                    - text: Edit
+                - generic [ref=e97]:
+                  - generic [ref=e98]:
+                    - generic [ref=e99]: Fee
+                    - generic [ref=e100]: €30
+                  - generic [ref=e101]:
+                    - generic [ref=e102]: Grace period
+                    - generic [ref=e103]: 10 min
+                  - generic [ref=e104]:
+                    - generic [ref=e105]: Late cancel
+                    - generic [ref=e106]: 24 h
+              - button "Send confirmation" [ref=e108] [cursor=pointer]:
+                - img [ref=e109]
+                - text: Send confirmation
+            - listitem [ref=e112]:
+              - generic [ref=e113]:
+                - generic [ref=e114]:
+                  - heading "Test2" [level=4] [ref=e115]
+                  - generic [ref=e116]: Draft (confirmation not sent)
+                - generic [ref=e117]:
+                  - generic [ref=e118]:
+                    - img [ref=e119]
+                    - text: Sat, Feb 7
+                  - generic [ref=e121]:
+                    - img [ref=e122]
+                    - text: 07:00 PM
+              - generic [ref=e125]:
+                - img [ref=e126]
+                - generic [ref=e129]: attenda.solution@gmail.com
+              - generic [ref=e130]:
+                - generic [ref=e131]:
+                  - generic [ref=e132]:
+                    - img [ref=e133]
+                    - generic [ref=e135]: No-Show Protection
+                  - button "Edit" [ref=e136] [cursor=pointer]:
+                    - img [ref=e137]
+                    - text: Edit
+                - generic [ref=e140]:
+                  - generic [ref=e141]:
+                    - generic [ref=e142]: Fee
+                    - generic [ref=e143]: €30
+                  - generic [ref=e144]:
+                    - generic [ref=e145]: Grace period
+                    - generic [ref=e146]: 10 min
+                  - generic [ref=e147]:
+                    - generic [ref=e148]: Late cancel
+                    - generic [ref=e149]: 24 h
+              - button "Send confirmation" [ref=e151] [cursor=pointer]:
+                - img [ref=e152]
+                - text: Send confirmation
+        - button "Show past (2)" [ref=e156] [cursor=pointer]:
+          - img [ref=e157]
+          - text: Show past (2)
+  - alert [ref=e11]
+  - generic [ref=e159]:
+    - paragraph [ref=e160]:
+      - text: We use cookies to improve your experience.
+      - link "Learn more" [ref=e161] [cursor=pointer]:
+        - /url: /privacy
+    - generic [ref=e162]:
+      - button "Decline" [ref=e163] [cursor=pointer]
+      - button "Accept" [ref=e164] [cursor=pointer]
