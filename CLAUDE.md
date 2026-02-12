@@ -314,8 +314,9 @@ When customer clicks confirmation link: PaymentIntent created **on business's co
 
 - **Refined sidebar** (desktop >=900px): Redesigned with premium aesthetic (2026-02-12)
 - Sidebar expanded: 260px, collapsed: 72px (state in localStorage)
-- **Mobile (<900px)**: Sidebar hidden, `DashboardHeader` shown via `.dashboard-mobile-header-fallback`
-- Key files: `DashboardContext.tsx`, `Sidebar.tsx`
+- **Mobile (<900px)**: Sidebar hidden, `DashboardHeader` conditionally rendered only after client-side mount check (fixes flash bug)
+- **IMPORTANT**: DashboardHeader only renders when `showMobileHeader` state is true (window.innerWidth < 900), checked after component mount
+- Key files: `DashboardContext.tsx`, `Sidebar.tsx`, `DashboardHeader.tsx`
 
 **Sidebar Structure:**
 
@@ -776,6 +777,9 @@ Required in `.env.local` (all configured in Vercel):
 - **Sidebar redesign (2026-02-12)**: New refined premium aesthetic with 260px/72px widths, gradient logo icon matching landing page, account card with avatar, Create Event button, strategic use of gradients, complete dark mode support
 - **Create Event query param**: Dashboard handles `?create=true` query parameter to open modal (used by sidebar Create Event button)
 - **Logo consistency**: Sidebar logo uses same `.logo-icon` and `.logo-text` classes as landing page header for visual consistency (gradient background icon)
+- **DashboardHeader flash bug (2026-02-12)**: ✅ FIXED - DashboardHeader component uses `position: fixed` with `z-index: 1000`, causing it to flash during page navigation on desktop despite wrapper being hidden. Solution: conditionally render DashboardHeader only on mobile (<900px) using client-side mount check with `showMobileHeader` state. Component does NOT render on desktop at all, preventing any flash.
+- **Settings card spacing**: Account & Business card spacing must match other settings cards. Use 16px bottom padding + border-bottom on description, then 10px top padding on first row (total: ~26px visual spacing). All settings cards should have consistent padding (18px card, 10px row, 14px gap), font sizes (0.875rem labels/values, 1rem titles), and divider lines.
+- **Sidebar logo styling**: Must have gradient background `linear-gradient(135deg, var(--color-brand) 0%, var(--color-brand-dark) 100%)` with `border-radius: 8px` and white SVG color to match landing page header logo. Size: 32px × 32px on sidebar, 36px × 36px on landing header.
 
 ---
 
