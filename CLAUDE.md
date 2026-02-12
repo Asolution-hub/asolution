@@ -467,19 +467,21 @@ SELECT schemaname, tablename, policyname FROM pg_policies WHERE schemaname = 'pu
 - **Templates:** React Email (`@react-email/components`) in `emails/` directory
 - **Deliverability:** Webhook handlers for bounces, complaints, delivery status
 
-| Template | File | Triggered By |
-|----------|------|--------------|
-| Booking Confirmation | `BookingConfirmation.tsx` | Dashboard "Send Confirmation" |
-| Booking Reminder | `BookingReminder.tsx` | Cron job (24h before, Pro only) |
-| No-Show Receipt | `NoShowReceipt.tsx` | "Mark no-show" action |
-| Refund Issued | `RefundIssued.tsx` | "Issue Refund" action |
-| Welcome Starter | `WelcomeStarter.tsx` | Free signup |
-| Welcome Pro | `WelcomePro.tsx` | Stripe checkout complete |
-| Usage Warning | `UsageWarning.tsx` | Cron job (at 25/30) |
-| Account Verified | `AccountVerified.tsx` | Stripe Connect onboarding complete |
-| Account Restricted | `AccountRestricted.tsx` | Stripe account restricted |
-| Dispute Created | `DisputeCreated.tsx` | Chargeback filed |
-| Calendar Disconnected | `CalendarDisconnected.tsx` | Google token expired |
+| Template | File | Triggered By | Status |
+|----------|------|--------------|--------|
+| Booking Confirmation | `BookingConfirmation.tsx` | Dashboard "Send Confirmation" | ✅ Live |
+| Booking Reminder | `BookingReminder.tsx` | Cron job (24h before, Pro only) | ✅ Live |
+| No-Show Receipt | `NoShowReceipt.tsx` | "Mark no-show" action | ✅ Live |
+| Refund Issued | `RefundIssued.tsx` | "Issue Refund" action | ✅ Live |
+| Welcome Starter | `WelcomeStarter.tsx` | Free signup | ✅ Live |
+| Welcome Pro | `WelcomePro.tsx` | Stripe checkout complete | ✅ Live |
+| Usage Warning | `UsageWarning.tsx` | Cron job (at 25/30) | ✅ Live |
+| Account Verified | - | Stripe Connect onboarding complete | ❌ Not implemented |
+| Account Restricted | - | Stripe account restricted | ❌ Not implemented |
+| Dispute Created | - | Chargeback filed | ❌ Not implemented |
+| Calendar Disconnected | - | Google token expired | ❌ Not implemented |
+| Reauthorization Required | - | PaymentIntent expired | ❌ Not implemented |
+| Payment Failed | - | Multiple auth failures | ❌ Not implemented |
 
 **Email Branding:**
 - **Starter**: "via Attenda" footer, Attenda branding
@@ -641,40 +643,66 @@ Required in `.env.local` (all configured in Vercel):
 - Dark/light mode
 - Landing page + blog
 
-### ✅ Security Hardening Complete (2026-02-11)
-**17 vulnerabilities fixed across all severity levels:**
-- **CRITICAL (4)**: Row Level Security enabled on all tables, Stripe Connect endpoints authenticated, webhook idempotency race condition fixed, weak CSRF protection strengthened
-- **HIGH (6)**: Redis rate limiting on critical endpoints, input sanitization, timing leak protection, GDPR data export/delete, email source validation
-- **MEDIUM (5)**: INTERNAL_API_SECRET enforcement, timing-safe secret comparison, admin whitelist, CSP improvements, rate limiting migration guide
-- **LOW (2)**: Environment variable documentation, deployment verification
+### ✅ Security Hardening DEPLOYED (2026-02-12)
+**17 vulnerabilities fixed across all severity levels - NOW LIVE IN PRODUCTION:**
 
-**See `SECURITY_FIXES_SUMMARY.md` for complete details and deployment checklist.**
+**CRITICAL (4)**:
+- Row Level Security enabled on all 8 existing tables (`profiles`, `google_connections`, `calendar_bookings`, `booking_confirmations`, `no_show_settings`, `appointment_no_show_overrides`, `appointment_attendance`, `stripe_charges`)
+- Stripe Connect endpoints authenticated with proper user access verification
+- Webhook idempotency race condition fixed with atomic database operations
+- Weak CSRF protection strengthened with origin verification on all state-changing endpoints
+
+**HIGH (6)**:
+- Redis rate limiting (Upstash) deployed on critical endpoints with fallback to in-memory for development
+- Input sanitization for XSS prevention (`sanitizeString`, `sanitizeForSMS`)
+- Timing leak protection on token validation with `constantTimeDelay()`
+- GDPR data export API (`/api/profile/export`) with JSON download
+- GDPR data deletion API (`/api/profile/delete`) with 7-year financial record retention
+- Admin endpoints protected with email whitelist
+
+**MEDIUM (5)**:
+- `INTERNAL_API_SECRET` enforcement with value verification (not just presence check)
+- Timing-safe secret comparison using `crypto.timingSafeEqual()`
+- CSP improvements in middleware
+- Health check endpoint (`/api/health`) deployed
+- Webhook reconciliation tool (`/api/admin/reconcile`) deployed
+
+**LOW (2)**:
+- Environment variable documentation complete
+- Deployment verification checklist created
+
+**Infrastructure Added:**
+- Database schema for disputes, refunds, webhook events, authorization failures
+- Admin tools: reconciliation endpoint, webhook viewer
+- Email templates for refunds (6 additional templates pending Connect implementation)
+
+**See `SECURITY_FIXES_SUMMARY.md` for complete details and testing checklist.**
 
 ### 🔴 CRITICAL - Must Implement Before Launch
 
 | Feature | Priority | Status | Timeline |
 |---------|----------|--------|----------|
 | **Stripe Connect** | CRITICAL | NOT STARTED | 2-3 weeks |
-| Business registration flow | CRITICAL | NOT STARTED | 1 week |
+| Business registration flow | CRITICAL | ✅ FRONTEND READY (no backend) | 1 week |
 | Connected account payouts | CRITICAL | NOT STARTED | 1 week |
-| Webhook idempotency | CRITICAL | ✅ COMPLETE | - |
-| Refund handling | CRITICAL | NOT STARTED | 1 week |
-| Dispute/chargeback handling | CRITICAL | NOT STARTED | 1 week |
-| Production monitoring (Sentry) | CRITICAL | NOT STARTED | 2 days |
-| Redis rate limiting | CRITICAL | ⚠️ PARTIAL (5/36 files) | 2 days |
-| Health check endpoint | CRITICAL | NOT STARTED | 1 day |
-| **Row Level Security** | CRITICAL | ✅ COMPLETE | - |
-| **GDPR Compliance** | CRITICAL | ✅ COMPLETE | - |
+| Webhook idempotency | CRITICAL | ✅ DEPLOYED | - |
+| Refund handling | CRITICAL | ✅ API READY (needs Connect) | 1 week |
+| Dispute/chargeback handling | CRITICAL | ✅ DB SCHEMA READY (no UI) | 1 week |
+| Production monitoring (Sentry) | CRITICAL | ❌ REMOVED (needs setup) | 2 days |
+| Redis rate limiting | CRITICAL | ✅ DEPLOYED (Upstash) | - |
+| Health check endpoint | CRITICAL | ✅ DEPLOYED | - |
+| **Row Level Security** | CRITICAL | ✅ DEPLOYED | - |
+| **GDPR Compliance** | CRITICAL | ✅ DEPLOYED | - |
 
 ### 🟡 High Priority - Should Have
 
 | Feature | Priority | Status | Timeline |
 |---------|----------|--------|----------|
-| PaymentIntent expiration handling | HIGH | NOT STARTED | 3 days |
-| Failed authorization retry | HIGH | NOT STARTED | 2 days |
+| PaymentIntent expiration handling | HIGH | ✅ API READY (no cron) | 3 days |
+| Failed authorization retry | HIGH | ✅ DB SCHEMA READY | 2 days |
 | Email deliverability tracking | HIGH | NOT STARTED | 2 days |
 | GDPR auto-delete cron | HIGH | NOT STARTED | 2 days |
-| Webhook reconciliation tool | HIGH | NOT STARTED | 3 days |
+| Webhook reconciliation tool | HIGH | ✅ DEPLOYED | - |
 | Admin dashboard | HIGH | NOT STARTED | 1 week |
 
 ### 🟢 Medium Priority - Nice to Have
@@ -712,14 +740,19 @@ Required in `.env.local` (all configured in Vercel):
 - **Sidebar dark mode nav links**: need explicit `[data-theme="dark"] .sidebar-nav-link` color (#cbd5e1)
 - **Webhook idempotency**: ✅ FIXED - Atomic INSERT operations prevent race conditions. Use `DROP POLICY IF EXISTS` before `CREATE POLICY` for safe re-runs.
 - **PaymentIntent expiry**: Auth expires after 7 days, must renew for bookings >7 days away
-- **Rate limiting**: ✅ PARTIALLY MIGRATED - 5/36 files use Redis. In-memory won't work in serverless. See `RATE_LIMITING_MIGRATION.md`.
+- **Rate limiting**: ✅ DEPLOYED - Redis via Upstash for production, in-memory fallback for development.
 - **Connected accounts**: Never create PaymentIntents on platform account — always use `on_behalf_of` and `transfer_data`
 - **Multi-currency**: Always store currency with amount. Display correct symbol based on user's country.
 - **Google token refresh**: Tokens expire every hour, refresh tokens expire after 6 months inactive. Must handle both.
-- **GDPR**: ✅ IMPLEMENTED - Data export (`/api/profile/export`) and deletion (`/api/profile/delete`) with 7-year financial retention.
+- **GDPR**: ✅ DEPLOYED - Data export (`/api/profile/export`) and deletion (`/api/profile/delete`) with 7-year financial retention.
 - **Disputes**: Business has limited time to respond with evidence. Track `evidence_due_by` dates.
 - **Skeleton loading states** used in dashboard (not spinner)
 - **SocialProof section removed** from landing page — Hero floating metrics are separate and kept
+- **Next.js 16 `useSearchParams()`**: Must wrap in `<Suspense>` boundary or page will fail static generation. Extract logic using searchParams into separate component, wrap in Suspense with loading fallback.
+- **Nested directory structure**: NEVER create directories like `app/attenda/app/` - causes duplicate Next.js installations and TypeScript type conflicts. Always verify correct locations: routes go in `app/api/`, components in `app/components/`, etc.
+- **node_modules in Git**: NEVER commit `app/attenda/node_modules/` - causes 100MB+ file errors on GitHub. Always check `git status` and selectively stage files, not `git add -A` blindly.
+- **Unimplemented features**: Don't import email templates or create config files for features not yet implemented (like Sentry). Comment out imports and add TODO notes until ready.
+- **Build testing**: Always run `npm run build` locally before pushing to catch TypeScript/build errors early. Vercel builds are slower and harder to debug.
 
 ---
 
