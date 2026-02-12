@@ -312,13 +312,33 @@ When customer clicks confirmation link: PaymentIntent created **on business's co
 
 ### Navigation
 
-- **Collapsible sidebar** (desktop >=900px): Logo + Pro badge, Events/Settings nav, Upgrade to Pro (Starter only), account email, theme toggle (icon-only), logout, collapse chevron
-- Sidebar expanded: 240px, collapsed: 64px (state in localStorage)
-- **Upgrade to Pro button**: Right below nav links (Events/Settings), visible when collapsed too
-- `menu_position` in `profiles` table (`'sidebar'` default or `'header'`)
-- Toggle between sidebar/header in Settings → Calendar Preferences → "Navigation style"
+- **Refined sidebar** (desktop >=900px): Redesigned with premium aesthetic (2026-02-12)
+- Sidebar expanded: 260px, collapsed: 72px (state in localStorage)
 - **Mobile (<900px)**: Sidebar hidden, `DashboardHeader` shown via `.dashboard-mobile-header-fallback`
 - Key files: `DashboardContext.tsx`, `Sidebar.tsx`
+
+**Sidebar Structure:**
+
+*Upper Section:*
+1. **Logo** - Gradient icon (Indigo → Indigo-dark) with white calendar SVG + "Attenda" text
+2. **Account Card** - Circular avatar with email initials, display name, Pro badge (⭐ Pro), email
+3. **Create Event Button** - Primary gradient button, handles `?create=true` query parameter
+4. **Usage Counter** - Card for Starter plan showing "X/30 Protection used this month"
+5. **Navigation** - Overview (renamed from Events), Settings, Analytics (disabled/coming soon)
+6. **Upgrade to Pro** - Gradient button (Starter only)
+
+*Lower Section:*
+1. **Theme Toggle** - Icon-only (no border/background)
+2. **Log Out** - Button with hover effect
+3. **Help Center** - Dimmed link (mailto:support@attenda.app)
+4. **Collapse Toggle** - Smooth chevron rotation animation
+
+**Design Features:**
+- Strategic Indigo → Teal gradients on key elements
+- Refined shadows and depth (cubic-bezier transitions)
+- Hover lifts and scale effects
+- Complete dark mode support
+- Logo matches landing page header (gradient background icon)
 
 ### Layout
 
@@ -358,7 +378,7 @@ Stripe needs additional information to enable payouts.
 - **Business Account card** (new): Business name, account status, last payout, links to Stripe Dashboard
 - **No-Show Policy card**: "Edit" button opens `NoShowSettingsModal`
 - **Notifications section**: Email confirmations (always on), SMS confirmations (Pro, to be implemented), Auto-Resend (Pro)
-- **Calendar Preferences**: Stacked layout, full-width toggles (week start, time format, nav style, timezone)
+- **Calendar Preferences**: Stacked layout, full-width toggles (week start, time format, timezone)
 - **Data & Privacy card** (new): Export My Data, Delete My Account
 - **Disputes section** (new): Active disputes, past disputes, links to evidence submission
 - All cards use `--color-bg-card` background, `--color-text` / `--color-text-secondary` font colors
@@ -753,6 +773,9 @@ Required in `.env.local` (all configured in Vercel):
 - **node_modules in Git**: NEVER commit `app/attenda/node_modules/` - causes 100MB+ file errors on GitHub. Always check `git status` and selectively stage files, not `git add -A` blindly.
 - **Unimplemented features**: Don't import email templates or create config files for features not yet implemented (like Sentry). Comment out imports and add TODO notes until ready.
 - **Build testing**: Always run `npm run build` locally before pushing to catch TypeScript/build errors early. Vercel builds are slower and harder to debug.
+- **Sidebar redesign (2026-02-12)**: New refined premium aesthetic with 260px/72px widths, gradient logo icon matching landing page, account card with avatar, Create Event button, strategic use of gradients, complete dark mode support
+- **Create Event query param**: Dashboard handles `?create=true` query parameter to open modal (used by sidebar Create Event button)
+- **Logo consistency**: Sidebar logo uses same `.logo-icon` and `.logo-text` classes as landing page header for visual consistency (gradient background icon)
 
 ---
 
