@@ -351,8 +351,12 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 ## 8. Authentication & Security
 
 ### Authentication
-- Supabase authentication (magic links + Google OAuth login)
-- Google OAuth for calendar integration (separate from login, token refresh implemented)
+- Supabase authentication (magic links + Google OAuth + Microsoft Azure OAuth login)
+- **Login Providers:**
+  - Magic link (email)
+  - Google OAuth (Supabase Google provider)
+  - Microsoft OAuth (Supabase Azure provider) - **WORKING**
+- **Calendar OAuth:** Google and Microsoft OAuth for calendar integration (separate from login, token refresh implemented)
 - Session management via Supabase cookies
 - Admin routes protected by email whitelist
 
@@ -413,14 +417,19 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 
 - **Implemented**:
   - Google Calendar (OAuth2 with token refresh, expiry tracking)
-  - Microsoft Outlook Calendar (Microsoft Graph API, OAuth2 with token refresh)
+- **Partially Implemented (Backend Only)**:
+  - Microsoft Outlook Calendar API routes created (`/api/microsoft/*`)
+  - Microsoft Graph API client (`lib/microsoftAuth.ts`)
+  - Settings UI updated with Connect/Disconnect buttons
+  - ⚠️ **Calendar connect authentication NOT working yet** - API routes can't read session cookies properly
+  - Login works, but calendar OAuth flow fails at authentication check
 - **Planned**: Apple Calendar
 - Architecture is provider-agnostic (uses unified `google_connections` table with `provider` column)
 - Auto-disconnect on `invalid_grant` errors
-- Email notifications on disconnection
-- Both providers can be connected simultaneously
-- Events synced in parallel, merged in dashboard
-- Setup guide: `docs/MICROSOFT_SETUP.md`
+- Email notifications on disconnection (planned)
+- Both providers can be connected simultaneously (once Microsoft connect is fixed)
+- Events synced in parallel, merged in dashboard (once Microsoft connect is fixed)
+- Setup guide: `docs/MICROSOFT_SETUP.md` (Azure configuration documented, but connect flow needs fixing)
 
 ---
 
@@ -493,9 +502,13 @@ Required in `.env.local` (all configured in Vercel):
 
 **Supabase:** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
 
-**Google OAuth:** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
+**Google OAuth (Calendar):** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
 
-**Microsoft OAuth:** `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_REDIRECT_URI`, `MICROSOFT_TENANT_ID`
+**Microsoft OAuth (Login + Calendar):**
+- `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` - Also configured in Supabase Azure provider for login
+- `MICROSOFT_REDIRECT_URI` - For calendar integration: `https://attenda.app/api/microsoft/callback`
+- `MICROSOFT_TENANT_ID` - Set to `common` for multi-tenant support
+- **Note:** Login via Supabase Azure provider works. Calendar connect API routes exist but auth check fails.
 
 **Email:** `RESEND_API_KEY`, `EMAIL_FROM`
 
@@ -571,6 +584,17 @@ Required in `.env.local` (all configured in Vercel):
 - **CRITICAL**: Stripe Connect NOT implemented. Payment flow incomplete. Must implement before launch.
 - **Default no-show fee is €20** (2000 cents) — not €30
 - **Connected accounts**: Never create PaymentIntents on platform account — always use `on_behalf_of` and `transfer_data`
+
+### Microsoft OAuth & Calendar Integration
+- **Microsoft Login**: ✅ WORKS - Users can log in via Supabase Azure provider
+- **Microsoft Calendar Connect**: ❌ BROKEN - API routes exist but authentication fails
+  - Routes: `/api/microsoft/connect`, `/callback`, `/status`, `/disconnect`, `/events`
+  - Library: `lib/microsoftAuth.ts` with Microsoft Graph API client
+  - Issue: Connect routes can't read Supabase session cookies (chunked cookie format)
+  - Attempted fixes: SSR client, manual cookie reading - both failed
+  - Session exists (proven by `/api/debug-auth`), but connect routes redirect to login
+- **Root cause**: Mismatch between how Supabase creates session cookies and how Next.js API routes read them
+- **Workaround needed**: Either fix cookie reading in API routes, or use different auth pattern for calendar OAuth
 - **PaymentIntent expiry**: Auth expires after 7 days, must renew for bookings >7 days away
 - **Multi-currency**: Always store currency with amount. Display correct symbol based on user's country.
 
