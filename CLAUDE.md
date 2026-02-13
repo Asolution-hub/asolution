@@ -81,6 +81,7 @@ This file provides guidance to Claude Code when working with this repository.
 **Framework**: Next.js 16, React 19, TypeScript, Tailwind CSS 4
 **Database/Auth**: Supabase (PostgreSQL + RLS + magic links + Google/Microsoft OAuth)
 **Payments**: Stripe Connect + Subscriptions
+**Monitoring**: Sentry (error tracking, performance monitoring, Session Replay)
 **External APIs**: Google Calendar (OAuth2), Microsoft Outlook Calendar (OAuth2), Resend (email), Twilio (SMS - planned)
 **Path alias**: `@/*` maps to project root
 
@@ -439,6 +440,45 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 
 **Planned:** Apple Calendar integration
 
+### Sentry Monitoring
+
+**✅ Fully Implemented and Production-Ready**
+
+**Configuration Files:**
+- `sentry.client.config.ts` - Client-side error tracking with Session Replay
+- `sentry.server.config.ts` - Server-side error tracking
+- `sentry.edge.config.ts` - Edge runtime error tracking
+- `instrumentation.ts` - Loads server/edge configs automatically
+- `next.config.ts` - Wrapped with `withSentryConfig`, tunnel route at `/monitoring`
+
+**Key Components:**
+- `app/components/SentryMonitoring.tsx` - Ensures client SDK loads on every page, exposes `window.Sentry` globally
+- `app/error.tsx` - Global error boundary that captures React errors
+- `proxy.ts` - Middleware excludes `/monitoring` route to allow Sentry tunnel
+
+**Features:**
+- ✅ Automatic error capture (client, server, edge)
+- ✅ Session Replay (100% on errors, 10% on normal sessions)
+- ✅ Tunnel route (`/monitoring`) bypasses ad-blockers
+- ✅ Source maps uploaded automatically in CI
+- ✅ Performance monitoring (tracesSampleRate: 1.0)
+- ✅ Tree-shaking removes debug logging in production
+
+**Testing:**
+```javascript
+// From browser console on attenda.app
+window.Sentry.captureMessage('Test message', 'error');
+throw new Error('Test error - ' + Date.now());
+```
+
+**Dashboard:** https://attenda.sentry.io/issues/?project=4510878977884240
+
+**Important Notes:**
+- Client config wrapped in `typeof window !== "undefined"` guard to prevent server-side execution
+- `replayIntegration` only available on client (not server/edge)
+- Middleware must exclude `/monitoring` or tunnel will fail
+- All errors appear in dashboard within 5 seconds
+
 ---
 
 ## 10. Frontend
@@ -560,7 +600,7 @@ Required in `.env.local` (all configured in Vercel):
 - Dark/light mode
 - Landing page + blog
 - **Security hardening:** RLS on all tables, Redis rate limiting, webhook idempotency, input sanitization, CSRF protection, admin auth
-- **Sentry monitoring:** Error tracking configured (client, server, edge), tunnel enabled, test page available
+- **Sentry monitoring:** ✅ PRODUCTION-READY - Full error tracking (client, server, edge), tunnel route configured, global error boundary, Session Replay enabled
 
 ### 🔴 CRITICAL - Blocking Launch
 
@@ -590,16 +630,17 @@ Required in `.env.local` (all configured in Vercel):
 ### Launch Readiness: ~95% Complete
 
 **Recent Updates (Feb 13, 2026):**
-- ✅ Sentry monitoring configured and tested
+- ✅ Sentry monitoring fully implemented and tested (client + server + edge)
 - ✅ Dispute/refund UI completed in dashboard
 - ✅ Proxy renamed from middleware (Next.js 16 convention)
+- ✅ Opengraph images fixed (display flex errors resolved)
 
 **Ready to launch** after:
 1. ✅ Database migrations deployed (DONE - Feb 13, 2026)
 2. ⏳ Set up cron scheduler (Vercel Pro or external service)
-3. ⏳ Configure Sentry monitoring
+3. ✅ Configure Sentry monitoring (DONE - Feb 13, 2026)
 4. ⏳ Test complete payment flow with test connected account
-5. 🔄 Add basic dispute/refund UI (can launch without, add post-launch)
+5. ✅ Add basic dispute/refund UI (DONE - Feb 13, 2026)
 
 ---
 
