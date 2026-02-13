@@ -534,6 +534,8 @@ Required in `.env.local` (all configured in Vercel):
 
 **Redis:** `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
 
+**Sentry:** `SENTRY_AUTH_TOKEN` (for source map uploads)
+
 **Stripe webhook events required:**
 - Subscriptions: `checkout.session.completed`, `customer.subscription.*`, `invoice.payment_*`
 - Payments: `payment_intent.succeeded`, `payment_intent.canceled`, `payment_intent.payment_failed`, `charge.captured`
@@ -558,14 +560,14 @@ Required in `.env.local` (all configured in Vercel):
 - Dark/light mode
 - Landing page + blog
 - **Security hardening:** RLS on all tables, Redis rate limiting, webhook idempotency, input sanitization, CSRF protection, admin auth
+- **Sentry monitoring:** Error tracking configured (client, server, edge), tunnel enabled, test page available
 
 ### 🔴 CRITICAL - Blocking Launch
 
 | Feature | Status |
 |---------|--------|
 | **Cron scheduler** | Routes implemented, need external scheduler (Vercel Hobby limitation) |
-| **Production monitoring (Sentry)** | Not configured - no error tracking or alerts |
-| **Dispute/refund UI** | Backend works, no dashboard interface for businesses |
+| **Dispute/refund UI** | ✅ DONE (Feb 13, 2026) - Modal with active disputes, evidence deadlines, past disputes summary |
 
 ### 🟡 High Priority (Post-Launch Week 1)
 
@@ -585,7 +587,12 @@ Required in `.env.local` (all configured in Vercel):
 | White-label emails (Pro) | Planned |
 | Business plan tier | Schema ready, UI not exposed |
 
-### Launch Readiness: ~90% Complete
+### Launch Readiness: ~95% Complete
+
+**Recent Updates (Feb 13, 2026):**
+- ✅ Sentry monitoring configured and tested
+- ✅ Dispute/refund UI completed in dashboard
+- ✅ Proxy renamed from middleware (Next.js 16 convention)
 
 **Ready to launch** after:
 1. ✅ Database migrations deployed (DONE - Feb 13, 2026)
