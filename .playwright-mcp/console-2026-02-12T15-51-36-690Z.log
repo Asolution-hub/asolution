@@ -1,0 +1,7 @@
+[     784ms] [ERROR] Failed to load resource: the server responded with a status of 400 () @ https://vlxwzuanbcpzsdkwaani.supabase.co/auth/v1/token?grant_type=refresh_token:0
+[     785ms] [ERROR] AuthApiError: Invalid Refresh Token: Refresh Token Not Found
+    at tL (https://attenda.app/_next/static/chunks/e1f01c7e7fac1375.js:24:46239)
+    at async tM (https://attenda.app/_next/static/chunks/e1f01c7e7fac1375.js:24:47183)
+    at async tq (https://attenda.app/_next/static/chunks/e1f01c7e7fac1375.js:24:46623)
+    at async r (https://attenda.app/_next/static/chunks/e1f01c7e7fac1375.js:37:24956)
+    at async https://attenda.app/_next/static/chunks/e1f01c7e7fac1375.js:37:25219 @ https://attenda.app/_next/static/chunks/e1f01c7e7fac1375.js:36

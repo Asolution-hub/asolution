@@ -1,0 +1,8 @@
+[    6754ms] Error: Sentry Client Test Error - This is expected!
+    at onClick (https://attenda.app/_next/static/chunks/add4733de2356812.js:2:1202)
+    at sY (https://attenda.app/_next/static/chunks/1af1c7fe26e99b9f.js:2:161826)
+    at https://attenda.app/_next/static/chunks/1af1c7fe26e99b9f.js:2:167714
+    at tD (https://attenda.app/_next/static/chunks/1af1c7fe26e99b9f.js:2:30321)
+    at s3 (https://attenda.app/_next/static/chunks/1af1c7fe26e99b9f.js:2:163059)
+    at fC (https://attenda.app/_next/static/chunks/1af1c7fe26e99b9f.js:2:199025)
+    at fP (https://attenda.app/_next/static/chunks/1af1c7fe26e99b9f.js:2:198847)

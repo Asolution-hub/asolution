@@ -1,0 +1,2 @@
+[      75ms] [ERROR] Failed to check Google connection: TypeError: Failed to fetch
+    at t (https://attenda.app/_next/static/chunks/1e15e245531ad9c2.js:1:44981) @ https://attenda.app/_next/static/chunks/1e15e245531ad9c2.js:0

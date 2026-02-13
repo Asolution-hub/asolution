@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Check Attenda Session</title>
+</head>
+<body>
+    <h1>Session Check</h1>
+    <div id="result">Checking...</div>
+
+    <script type="module">
+        // Import Supabase client
+        import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
+
+        const supabase = createClient(
+            'https://vlxwzuanbcpzsdkwaani.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZseHd6dWFuYmNwenNka3dhYW5pIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzY0MTYwNzUsImV4cCI6MjA1MTk5MjA3NX0.lHG88U_mU8PKFnH21ywZfhMtHDIf-4QVyIoI5FGsOmM'
+        )
+
+        const { data: { session }, error } = await supabase.auth.getSession()
+
+        const resultDiv = document.getElementById('result')
+
+        if (error) {
+            resultDiv.innerHTML = `<p style="color: red;">❌ Error: ${error.message}</p>`
+        } else if (session) {
+            resultDiv.innerHTML = `
+                <h2 style="color: green;">✅ You are logged in!</h2>
+                <p><strong>User ID:</strong> ${session.user.id}</p>
+                <p><strong>Email:</strong> ${session.user.email}</p>
+                <p><strong>Provider:</strong> ${session.user.app_metadata.provider}</p>
+                <p><strong>Access Token:</strong> ${session.access_token.substring(0, 20)}...</p>
+                <hr>
+                <h3>Now try clicking Connect again!</h3>
+            `
+        } else {
+            resultDiv.innerHTML = `
+                <h2 style="color: orange;">❌ No active session</h2>
+                <p>You need to log in first at <a href="https://attenda.app/login">attenda.app/login</a></p>
+            `
+        }
+    </script>
+</body>
+</html>
