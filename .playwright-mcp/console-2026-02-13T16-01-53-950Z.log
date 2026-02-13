@@ -1,0 +1,31 @@
+[    5292ms] [ERROR] Failed to load resource: the server responded with a status of 404 () @ https://attenda.app/favicon.ico:0
+[  448989ms] Error: Sentry test error - 2026-02-13T16:09:22.929Z
+    at onClick (http://localhost:3000/_next/static/chunks/Attenda_App_attenda_app_test-sentry_page_tsx_9d00103d._.js:28:27)
+    at executeDispatch (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10315:13)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:966:74)
+    at processDispatchQueue (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10341:41)
+    at http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10616:13
+    at batchedUpdates$1 (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:2254:44)
+    at dispatchEventForPluginEventSystem (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10417:9)
+    at dispatchEvent (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:12936:37)
+    at dispatchDiscreteEvent (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:12918:64)
+[  525452ms] Error: Sentry test error - 2026-02-13T16:10:39.396Z
+    at onClick (http://localhost:3000/_next/static/chunks/Attenda_App_attenda_app_test-sentry_page_tsx_9d00103d._.js:28:27)
+    at executeDispatch (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10315:13)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:966:74)
+    at processDispatchQueue (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10341:41)
+    at http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10616:13
+    at batchedUpdates$1 (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:2254:44)
+    at dispatchEventForPluginEventSystem (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10417:9)
+    at dispatchEvent (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:12936:37)
+    at dispatchDiscreteEvent (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:12918:64)
+[  533585ms] Error: Sentry test error - 2026-02-13T16:10:47.529Z
+    at onClick (http://localhost:3000/_next/static/chunks/Attenda_App_attenda_app_test-sentry_page_tsx_9d00103d._.js:28:27)
+    at executeDispatch (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10315:13)
+    at runWithFiberInDEV (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:966:74)
+    at processDispatchQueue (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10341:41)
+    at http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10616:13
+    at batchedUpdates$1 (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:2254:44)
+    at dispatchEventForPluginEventSystem (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:10417:9)
+    at dispatchEvent (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:12936:37)
+    at dispatchDiscreteEvent (http://localhost:3000/_next/static/chunks/0b268_next_dist_compiled_react-dom_66a3e5d4._.js:12918:64)
