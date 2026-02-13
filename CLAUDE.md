@@ -362,7 +362,7 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 
 ### Security Architecture
 
-**Row Level Security (RLS):** All 8 core tables protected with user-scoped RLS policies using `auth.uid()`. Users can only access their own data. Migration: `migrations/005-enable-rls-EXISTING-TABLES-ONLY.sql`. Tables: profiles, calendar_bookings, booking_confirmations, google_connections, no_show_settings, appointment_no_show_overrides, appointment_attendance, clients.
+**Row Level Security (RLS):** All 17 tables protected with user-scoped RLS policies using `auth.uid()`. Users can only access their own data. Migration: `migrations/005-enable-rls-policies-SAFE-RERUN.sql` (deployed Feb 13, 2026). Core tables: profiles, calendar_bookings, booking_confirmations, google_connections, no_show_settings, appointment_no_show_overrides, appointment_attendance, clients. New tables: stripe_refunds, stripe_disputes, user_data_exports, account_deletions, plus 5 service-role-only tables.
 
 **API Route Protection:** All routes use `verifyUserAccess()`. UUID validation, calendar event ID validation, rate limiting via Redis (Upstash) for critical endpoints, ownership verification on all resource access, CSRF protection via `verifyOrigin()` on ALL state-changing POST endpoints.
 
@@ -491,18 +491,20 @@ Premium DataPulse-inspired design with Framer Motion animations and `prefers-red
 
 ### Migrations (run in Supabase SQL Editor)
 
-**✅ Deployed:**
-- `005-enable-rls-EXISTING-TABLES-ONLY.sql` - Row Level Security on 8 core tables
+**✅ Deployed (Feb 13, 2026):**
+- `001-stripe-connect.sql` - Stripe Connect fields, business onboarding tables
+- `002-webhook-system.sql` - Webhook idempotency, payment failure tracking
+- `003-refunds-disputes.sql` - Refund/dispute management tables
+- `004-gdpr-compliance.sql` - Data export/deletion, anonymization functions
+- `005-enable-rls-policies-SAFE-RERUN.sql` - RLS on all 17 tables (8 core + 9 new)
 
-**📋 Planned:**
-- `001-stripe-connect.sql` - Stripe Connect fields
-- `002-multi-currency.sql` - Currency support
-- `003-refunds-disputes.sql` - Refund/dispute tracking
-- `004-webhook-idempotency.sql` - Webhook event logging
-- `token-refresh.sql` - Google token expiry tracking
-- `data-retention.sql` - GDPR compliance fields
-
-**⚠️ Important:** When running migrations 001-004, update the RLS migration to include new tables. Use `005-enable-rls-policies-SAFE-RERUN.sql` as template.
+**Database Status:**
+- ✅ 17 tables with Row Level Security enabled
+- ✅ Stripe Connect columns in `profiles` table
+- ✅ Multi-currency support (EUR/USD)
+- ✅ GDPR compliance (export/delete/anonymize)
+- ✅ Webhook idempotency system
+- ✅ Dispute/refund tracking
 
 ### Environment Variables
 
@@ -545,53 +547,62 @@ Required in `.env.local` (all configured in Vercel):
 ### ✅ Implemented
 - Dashboard UI (calendar, events, settings)
 - **Calendar integrations:** Google Calendar + Microsoft Outlook Calendar (OAuth2, token refresh, parallel sync)
+- **Stripe Connect:** Full implementation (onboarding, verification, connected accounts, webhook handlers)
+- **Business registration:** Complete flow with OnboardingBanner UI (pending/restricted/verified states)
+- **Payment flow:** PaymentIntents use `on_behalf_of` and `transfer_data` (money goes to business, not platform)
+- **Database migrations:** All 4 production migrations deployed + RLS policies on 17 tables
+- **Backend systems:** 6 cron routes, dispute/refund handlers, GDPR endpoints, admin reconciliation
 - Email confirmations via Resend
 - Stripe subscriptions (Starter/Pro)
-- Multi-currency UI support
+- Multi-currency support (EUR/USD)
 - Dark/light mode
 - Landing page + blog
-- **Security hardening deployed:** RLS on all tables, Redis rate limiting, GDPR endpoints, webhook idempotency, input sanitization, CSRF protection, admin auth
+- **Security hardening:** RLS on all tables, Redis rate limiting, webhook idempotency, input sanitization, CSRF protection, admin auth
 
 ### 🔴 CRITICAL - Blocking Launch
 
 | Feature | Status |
 |---------|--------|
-| **Stripe Connect** | NOT STARTED - Payment flow incomplete, no destination for money |
-| Business registration backend | Frontend ready, no backend implementation |
-| Connected account payouts | NOT STARTED |
-| Dispute/chargeback UI | DB schema ready, no UI |
-| Production monitoring (Sentry) | Needs setup |
+| **Cron scheduler** | Routes implemented, need external scheduler (Vercel Hobby limitation) |
+| **Production monitoring (Sentry)** | Not configured - no error tracking or alerts |
+| **Dispute/refund UI** | Backend works, no dashboard interface for businesses |
 
-### 🟡 High Priority
+### 🟡 High Priority (Post-Launch Week 1)
 
 | Feature | Status |
 |---------|--------|
-| PaymentIntent expiration cron | API ready, no cron scheduler |
-| Failed authorization retry | DB schema ready |
-| Email deliverability tracking | NOT STARTED |
-| GDPR auto-delete cron | NOT STARTED |
-| Admin dashboard | NOT STARTED |
+| **Test end-to-end payment flow** | Need real Stripe Connect account test |
+| **Email deliverability tracking** | Resend webhooks for bounces/complaints |
+| **Admin dashboard** | Webhook logs, system health, user management |
+| **Stripe Connect edge cases** | Account restricted, payout failures, re-verification |
 
 ### 🟢 Medium Priority
 
 | Feature | Status |
 |---------|--------|
-| SMS implementation (Twilio) | 40% complete |
+| SMS implementation (Twilio) | 40% complete - backend ready, need Twilio setup |
 | Timezone support | Planned |
 | White-label emails (Pro) | Planned |
+| Business plan tier | Schema ready, UI not exposed |
 
-### Deployment Blockers
+### Launch Readiness: ~90% Complete
 
-**DO NOT LAUNCH** until Stripe Connect is fully implemented. Current system cannot process payments correctly. Money has no destination account.
+**Ready to launch** after:
+1. ✅ Database migrations deployed (DONE - Feb 13, 2026)
+2. ⏳ Set up cron scheduler (Vercel Pro or external service)
+3. ⏳ Configure Sentry monitoring
+4. ⏳ Test complete payment flow with test connected account
+5. 🔄 Add basic dispute/refund UI (can launch without, add post-launch)
 
 ---
 
 ## 13. Critical Gotchas
 
 ### Payment & Security
-- **CRITICAL**: Stripe Connect NOT implemented. Payment flow incomplete. Must implement before launch.
 - **Default no-show fee is €20** (2000 cents) — not €30
-- **Connected accounts**: Never create PaymentIntents on platform account — always use `on_behalf_of` and `transfer_data`
+- **Connected accounts**: PaymentIntents correctly use `on_behalf_of` and `transfer_data` (verified in `/api/stripe/create-authorization`)
+- **Stripe Connect flow**: User → onboarding → pending → enabled (tracked in `OnboardingBanner` component)
+- **Payment authorization**: Only works after `onboarding_completed = true` (enforced in create-authorization route)
 
 ### Calendar Integration Implementation Notes
 - **Microsoft Login**: ✅ WORKING - Users can log in via Supabase Azure provider
@@ -605,8 +616,9 @@ Required in `.env.local` (all configured in Vercel):
 
 ### Database
 - **`profiles` table has NO `email` column** — get email from `user` object (via `getAuthenticatedUser()`)
-- **RLS Migration**: Use `005-enable-rls-EXISTING-TABLES-ONLY.sql` which only applies RLS to 8 existing tables
-- **`appointment_attendance` and `appointment_no_show_overrides`** use `user_id` directly, NOT `booking_id`. RLS policies must use `auth.uid() = user_id`.
+- **RLS Migration**: `005-enable-rls-policies-SAFE-RERUN.sql` covers all 17 tables (deployed Feb 13, 2026)
+- **`appointment_attendance` and `appointment_no_show_overrides`** use `user_id` directly, NOT `booking_id`. RLS policies must use `auth.uid() = user_id`
+- **Migrations deployed:** 001-stripe-connect, 002-webhook-system, 003-refunds-disputes, 004-gdpr-compliance, 005-enable-rls-policies-SAFE-RERUN
 
 ### Development
 - **Timezone dates**: Always use `toLocalDateStr()`, never `toISOString().split("T")[0]`
