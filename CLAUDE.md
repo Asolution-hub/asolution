@@ -406,9 +406,36 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 
 ### Security Architecture
 
+**✅ Production Hardened (Feb 13, 2026)** - Comprehensive security audit completed and all critical/high-priority vulnerabilities fixed.
+
 **Row Level Security (RLS):** All 17 tables protected with user-scoped RLS policies using `auth.uid()`. Users can only access their own data. Migration: `migrations/005-enable-rls-policies-SAFE-RERUN.sql` (deployed Feb 13, 2026). Core tables: profiles, calendar_bookings, booking_confirmations, google_connections, no_show_settings, appointment_no_show_overrides, appointment_attendance, clients. New tables: stripe_refunds, stripe_disputes, user_data_exports, account_deletions, plus 5 service-role-only tables.
 
-**API Route Protection:** All routes use `verifyUserAccess()`. UUID validation, calendar event ID validation, rate limiting via Redis (Upstash) for critical endpoints, ownership verification on all resource access, CSRF protection via `verifyOrigin()` on ALL state-changing POST endpoints.
+**API Route Protection:**
+- **Admin Routes**: Email whitelist authentication required (`/api/admin/reconcile`, `/api/admin/webhooks`)
+- **User Routes**: `verifyUserAccess()` validates authentication + user ownership
+- **OAuth Connect Routes**: No session verification - HMAC-signed OAuth state provides CSRF protection (`/api/google/connect`, `/api/microsoft/connect`)
+- **OAuth Status Routes**: No session verification - protected by UUID validation + rate limiting + database RLS (`/api/google/status`, `/api/microsoft/status`)
+- **Debug Endpoints**: Return 404 in production (`/api/debug-auth`, `/api/sentry-test-error`)
+- **Health Endpoint**: Detailed metrics restricted to admin users only
+- **CSRF Protection**: `verifyOrigin()` on ALL state-changing POST endpoints
+- **UUID Validation**: All route parameters validated with `isValidUUID()`
+- **Confirmation Page**: Server-side UUID validation on token parameter
+
+**Rate Limiting (Redis-based via Upstash):**
+- **✅ Migration Complete**: All 37 API routes migrated from ineffective in-memory to Redis-based rate limiting (Feb 13, 2026)
+- **Confirmation endpoints**: 10 req/min (`confirmation` limiter)
+- **Stripe operations**: 20 req/min (`stripe` limiter)
+- **Refund operations**: 5 req/min (`refund` limiter)
+- **General API**: 60 req/min (`api` limiter)
+- **Auth endpoints**: 5 req/min (`auth` limiter)
+- **Webhooks**: 100 req/min (`webhook` limiter)
+- **Critical**: In-memory rate limiting is ineffective in serverless environments (each function instance has separate memory)
+
+**Default Values (Centralized):**
+- **No-show fee**: `DEFAULT_NO_SHOW_FEE_CENTS = 2000` (€20.00 / $20.00) in `lib/noShowRules.ts`
+- **Grace period**: `DEFAULT_GRACE_PERIOD_MINUTES = 10`
+- **Late cancel**: `DEFAULT_LATE_CANCEL_HOURS = 24`
+- All routes use these constants (no hardcoded values)
 
 **Token Security:** OAuth tokens encrypted with AES-256-GCM (MANDATORY). Cron jobs via `verifyCronSecret()`. Internal calls via `verifyInternalSecret()`. Token enumeration prevented via `constantTimeDelay()`. Server-side 24h confirmation token expiration.
 
@@ -471,15 +498,27 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
   - Settings UI: Connect/Disconnect with status indicator
   - Setup guide: `docs/MICROSOFT_SETUP.md` (Azure Entra ID configuration)
 
-**Architecture:**
+**Security Architecture:**
+- **OAuth Connect Routes** (`/api/google/connect`, `/api/microsoft/connect`):
+  - ✅ **No session verification** - HMAC-signed OAuth state parameter provides CSRF protection
+  - State parameter cryptographically signed with `OAUTH_STATE_SECRET`
+  - Callback route verifies state signature to ensure legitimate user initiated the flow
+  - **IMPORTANT**: Session verification was incorrectly added during security audit (Feb 13) and has been removed
+- **OAuth Status Routes** (`/api/google/status`, `/api/microsoft/status`):
+  - ✅ **No session verification** - protected by UUID validation + Redis rate limiting + database RLS policies
+  - Using `supabaseAdmin` with RLS policies ensures users can only see their own connections
+  - **IMPORTANT**: Session verification breaks status checks and was removed (Feb 13)
+- **OAuth Callback Routes** (`/api/google/callback`, `/api/microsoft/callback`):
+  - Verify OAuth state signature (prevents CSRF attacks)
+  - Extract userId from verified state parameter
+  - Encrypt tokens with AES-256-GCM before storing in database
+
+**Data Architecture:**
 - Provider-agnostic design using unified `google_connections` table with `provider` column
-- Both providers can be connected simultaneously
-- Events synced in parallel, merged in dashboard calendar view
+- Both Google and Microsoft can be connected simultaneously
+- Events synced in parallel from both providers, merged in dashboard calendar view
 - Auto-disconnect on `invalid_grant` errors
-- Token encryption with AES-256-GCM before database storage
-- OAuth state parameters cryptographically signed for CSRF protection
-- No session verification in connect routes (OAuth state provides security)
-- Status routes protected by UUID validation, rate limiting, and database RLS policies
+- Token encryption with AES-256-GCM before database storage (MANDATORY)
 
 **Planned:** Apple Calendar integration
 
@@ -699,17 +738,26 @@ Required in `.env.local` (all configured in Vercel):
 ## 13. Critical Gotchas
 
 ### Payment & Security
-- **Default no-show fee is €20** (2000 cents) — not €30
+- **Default no-show fee is €20** (2000 cents) — not €30. Use `DEFAULT_NO_SHOW_FEE_CENTS` constant from `lib/noShowRules.ts`
 - **Connected accounts**: PaymentIntents correctly use `on_behalf_of` and `transfer_data` (verified in `/api/stripe/create-authorization`)
 - **Stripe Connect flow**: User → onboarding → pending → enabled (tracked in `OnboardingBanner` component)
 - **Payment authorization**: Only works after `onboarding_completed = true` (enforced in create-authorization route)
+- **Rate limiting**: ALWAYS use Redis-based rate limiting from `@/lib/rateLimit`, NEVER in-memory from `@/lib/validation` (ineffective in serverless)
+- **Admin routes**: MUST use email whitelist authentication (`ADMIN_EMAILS` env var)
+- **Debug/test routes**: MUST return 404 in production to prevent information disclosure
 
 ### Calendar Integration Implementation Notes
 - **Microsoft Login**: ✅ WORKING - Users can log in via Supabase Azure provider
 - **Microsoft Calendar**: ✅ WORKING - Full OAuth2 integration with Microsoft Graph API
 - **Google Calendar**: ✅ WORKING - Full OAuth2 integration with Google APIs
-- **Architecture Decision**: Connect routes don't verify session - OAuth state parameter (cryptographically signed with HMAC) provides CSRF protection. Callback verifies state to ensure legitimate user initiated the OAuth flow.
-- **Status API Security**: No session verification needed - protected by UUID validation, rate limiting, and database RLS policies
+- **✅ CRITICAL - Connect Routes**: NEVER add session verification to `/api/google/connect` or `/api/microsoft/connect`
+  - OAuth state parameter (HMAC-signed) provides CSRF protection
+  - Session verification breaks the OAuth flow (incorrectly added Feb 13, removed same day)
+  - Callback route verifies state signature to ensure legitimate user initiated flow
+- **✅ CRITICAL - Status Routes**: NEVER add session verification to `/api/google/status` or `/api/microsoft/status`
+  - Protected by: UUID validation + Redis rate limiting + database RLS policies
+  - Session verification breaks status checks and prevents "Connected" badge from showing
+  - Using `supabaseAdmin` with RLS ensures users can only see their own connections
 - **Query Param Handling**: Settings page useEffects must preserve other query params when clearing their own (e.g., subscription success, upgrade, OAuth callback)
 - **PaymentIntent expiry**: Auth expires after 7 days, must renew for bookings >7 days away
 - **Multi-currency**: Always store currency with amount. Display correct symbol based on user's country.
