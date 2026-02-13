@@ -79,9 +79,9 @@ This file provides guidance to Claude Code when working with this repository.
 ## 3. Tech Stack & Commands
 
 **Framework**: Next.js 16, React 19, TypeScript, Tailwind CSS 4
-**Database/Auth**: Supabase (PostgreSQL + RLS + magic links + Google OAuth)
+**Database/Auth**: Supabase (PostgreSQL + RLS + magic links + Google/Microsoft OAuth)
 **Payments**: Stripe Connect + Subscriptions
-**External APIs**: Google Calendar (OAuth2), Resend (email), Twilio (SMS - planned)
+**External APIs**: Google Calendar (OAuth2), Microsoft Outlook Calendar (OAuth2), Resend (email), Twilio (SMS - planned)
 **Path alias**: `@/*` maps to project root
 
 **Commands** (run from `/App/attenda/`):
@@ -354,9 +354,9 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 - Supabase authentication (magic links + Google OAuth + Microsoft Azure OAuth login)
 - **Login Providers:**
   - Magic link (email)
-  - Google OAuth (Supabase Google provider)
-  - Microsoft OAuth (Supabase Azure provider) - **WORKING**
-- **Calendar OAuth:** Google and Microsoft OAuth for calendar integration (separate from login, token refresh implemented)
+  - Google OAuth (Supabase Google provider) ✅
+  - Microsoft OAuth (Supabase Azure provider) ✅
+- **Calendar OAuth:** Google Calendar and Microsoft Outlook Calendar OAuth for calendar integration (separate from login OAuth apps, token refresh and expiry tracking implemented) ✅
 - Session management via Supabase cookies
 - Admin routes protected by email whitelist
 
@@ -415,21 +415,29 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 
 ### Calendar Integrations
 
-- **Implemented**:
-  - Google Calendar (OAuth2 with token refresh, expiry tracking)
-- **Partially Implemented (Backend Only)**:
-  - Microsoft Outlook Calendar API routes created (`/api/microsoft/*`)
-  - Microsoft Graph API client (`lib/microsoftAuth.ts`)
-  - Settings UI updated with Connect/Disconnect buttons
-  - ⚠️ **Calendar connect authentication NOT working yet** - API routes can't read session cookies properly
-  - Login works, but calendar OAuth flow fails at authentication check
-- **Planned**: Apple Calendar
-- Architecture is provider-agnostic (uses unified `google_connections` table with `provider` column)
+**✅ Fully Implemented:**
+- **Google Calendar**: OAuth2 with token refresh, expiry tracking, full CRUD operations
+  - Routes: `/api/google/connect`, `/callback`, `/status`, `/disconnect`, `/events`
+  - Library: Native Google APIs client (`googleapis` package)
+  - Settings UI: Connect/Disconnect with status indicator
+
+- **Microsoft Outlook Calendar**: OAuth2 with Microsoft Graph API, token refresh, full CRUD operations
+  - Routes: `/api/microsoft/connect`, `/callback`, `/status`, `/disconnect`, `/events`
+  - Library: `lib/microsoftAuth.ts` (Microsoft Graph API client)
+  - Settings UI: Connect/Disconnect with status indicator
+  - Setup guide: `docs/MICROSOFT_SETUP.md` (Azure Entra ID configuration)
+
+**Architecture:**
+- Provider-agnostic design using unified `google_connections` table with `provider` column
+- Both providers can be connected simultaneously
+- Events synced in parallel, merged in dashboard calendar view
 - Auto-disconnect on `invalid_grant` errors
-- Email notifications on disconnection (planned)
-- Both providers can be connected simultaneously (once Microsoft connect is fixed)
-- Events synced in parallel, merged in dashboard (once Microsoft connect is fixed)
-- Setup guide: `docs/MICROSOFT_SETUP.md` (Azure configuration documented, but connect flow needs fixing)
+- Token encryption with AES-256-GCM before database storage
+- OAuth state parameters cryptographically signed for CSRF protection
+- No session verification in connect routes (OAuth state provides security)
+- Status routes protected by UUID validation, rate limiting, and database RLS policies
+
+**Planned:** Apple Calendar integration
 
 ---
 
@@ -536,7 +544,7 @@ Required in `.env.local` (all configured in Vercel):
 
 ### ✅ Implemented
 - Dashboard UI (calendar, events, settings)
-- Google Calendar integration with token refresh
+- **Calendar integrations:** Google Calendar + Microsoft Outlook Calendar (OAuth2, token refresh, parallel sync)
 - Email confirmations via Resend
 - Stripe subscriptions (Starter/Pro)
 - Multi-currency UI support
@@ -585,16 +593,13 @@ Required in `.env.local` (all configured in Vercel):
 - **Default no-show fee is €20** (2000 cents) — not €30
 - **Connected accounts**: Never create PaymentIntents on platform account — always use `on_behalf_of` and `transfer_data`
 
-### Microsoft OAuth & Calendar Integration
-- **Microsoft Login**: ✅ WORKS - Users can log in via Supabase Azure provider
-- **Microsoft Calendar Connect**: ❌ BROKEN - API routes exist but authentication fails
-  - Routes: `/api/microsoft/connect`, `/callback`, `/status`, `/disconnect`, `/events`
-  - Library: `lib/microsoftAuth.ts` with Microsoft Graph API client
-  - Issue: Connect routes can't read Supabase session cookies (chunked cookie format)
-  - Attempted fixes: SSR client, manual cookie reading - both failed
-  - Session exists (proven by `/api/debug-auth`), but connect routes redirect to login
-- **Root cause**: Mismatch between how Supabase creates session cookies and how Next.js API routes read them
-- **Workaround needed**: Either fix cookie reading in API routes, or use different auth pattern for calendar OAuth
+### Calendar Integration Implementation Notes
+- **Microsoft Login**: ✅ WORKING - Users can log in via Supabase Azure provider
+- **Microsoft Calendar**: ✅ WORKING - Full OAuth2 integration with Microsoft Graph API
+- **Google Calendar**: ✅ WORKING - Full OAuth2 integration with Google APIs
+- **Architecture Decision**: Connect routes don't verify session - OAuth state parameter (cryptographically signed with HMAC) provides CSRF protection. Callback verifies state to ensure legitimate user initiated the OAuth flow.
+- **Status API Security**: No session verification needed - protected by UUID validation, rate limiting, and database RLS policies
+- **Query Param Handling**: Settings page useEffects must preserve other query params when clearing their own (e.g., subscription success, upgrade, OAuth callback)
 - **PaymentIntent expiry**: Auth expires after 7 days, must renew for bookings >7 days away
 - **Multi-currency**: Always store currency with amount. Display correct symbol based on user's country.
 
