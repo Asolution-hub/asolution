@@ -163,6 +163,49 @@ App/attenda/
 - `/api/profile/export` - GDPR data export (JSON)
 - `/api/profile/delete` - Account deletion (7-year financial retention)
 
+### Cron Jobs (Vercel Free Tier)
+
+**✅ Running Daily at 17:00 UTC**
+
+All cron jobs adapted for Vercel free tier limitations (once daily, ±59 min precision).
+
+**Jobs:**
+1. **send-draft-confirmation** (`/api/cron/send-draft-confirmation`)
+   - Sends ALL pending draft confirmations
+   - Manual "Send Now" button available in dashboard
+   - Respects Starter 30/month limit
+   - Daily auto-send for both Starter and Pro
+
+2. **send-reminders** (`/api/cron/send-reminders`)
+   - Sends reminders for appointments in next 24 hours
+   - "Tomorrow's schedule" style (not "1 hour before")
+   - Pro users only
+   - Skips if reminder already sent
+
+3. **sync-calendar** (`/api/cron/sync-calendar`)
+   - Syncs Google/Microsoft calendars for all connected users
+   - Fetches events from last 24h and next 7 days
+   - Also syncs on-demand when dashboard loads
+   - Manual "Sync Now" button available
+
+4. **check-usage** (`/api/cron/check-usage`)
+   - Warns Starter users at 25/30 appointments
+   - Once per month warning limit
+   - Email notification sent via Resend
+
+5. **check-expiring-authorizations** (`/api/cron/check-expiring-authorizations`)
+   - Renews PaymentIntents expiring within 24 hours
+   - PaymentIntents expire after 7 days
+   - Critical for bookings >7 days away
+   - Creates new authorization, notifies client
+
+**Security:** All cron routes require `x-cron-secret` header matching `CRON_SECRET` env var.
+
+**Upgrade Path:** When upgrading to Vercel Pro ($20/month), can increase frequency:
+- send-draft-confirmation: Every 15 min
+- sync-calendar: Every 15-30 min
+- send-reminders: Every hour (1 hour before style)
+
 ---
 
 ## 5. Plans, Pricing & Limits
@@ -593,7 +636,8 @@ Required in `.env.local` (all configured in Vercel):
 - **Business registration:** Complete flow with OnboardingBanner UI (pending/restricted/verified states)
 - **Payment flow:** PaymentIntents use `on_behalf_of` and `transfer_data` (money goes to business, not platform)
 - **Database migrations:** All 4 production migrations deployed + RLS policies on 17 tables
-- **Backend systems:** 6 cron routes, dispute/refund handlers, GDPR endpoints, admin reconciliation
+- **Backend systems:** 6 cron routes (running daily on Vercel free tier), dispute/refund handlers, GDPR endpoints, admin reconciliation
+- **Cron jobs:** ✅ LIVE - 5 jobs running daily at 17:00 UTC (send-draft-confirmation, send-reminders, sync-calendar, check-usage, check-expiring-authorizations)
 - Email confirmations via Resend
 - Stripe subscriptions (Starter/Pro)
 - Multi-currency support (EUR/USD)
@@ -606,7 +650,7 @@ Required in `.env.local` (all configured in Vercel):
 
 | Feature | Status |
 |---------|--------|
-| **Cron scheduler** | Routes implemented, need external scheduler (Vercel Hobby limitation) |
+| **Cron scheduler** | ✅ DONE (Feb 13, 2026) - 5 jobs running daily on Vercel free tier at 17:00 UTC |
 | **Dispute/refund UI** | ✅ DONE (Feb 13, 2026) - Modal with active disputes, evidence deadlines, past disputes summary |
 
 ### 🟡 High Priority (Post-Launch Week 1)
@@ -627,20 +671,28 @@ Required in `.env.local` (all configured in Vercel):
 | White-label emails (Pro) | Planned |
 | Business plan tier | Schema ready, UI not exposed |
 
-### Launch Readiness: ~95% Complete
+### Launch Readiness: ~98% Complete
 
 **Recent Updates (Feb 13, 2026):**
 - ✅ Sentry monitoring fully implemented and tested (client + server + edge)
 - ✅ Dispute/refund UI completed in dashboard
-- ✅ Proxy renamed from middleware (Next.js 16 convention)
+- ✅ Cron jobs adapted for Vercel free tier (daily execution at 17:00 UTC)
+- ✅ All 5 cron jobs enabled and running in production
 - ✅ Opengraph images fixed (display flex errors resolved)
 
 **Ready to launch** after:
 1. ✅ Database migrations deployed (DONE - Feb 13, 2026)
-2. ⏳ Set up cron scheduler (Vercel Pro or external service)
+2. ✅ Set up cron scheduler (DONE - Feb 13, 2026) - 5 jobs running daily on Vercel free
 3. ✅ Configure Sentry monitoring (DONE - Feb 13, 2026)
 4. ⏳ Test complete payment flow with test connected account
 5. ✅ Add basic dispute/refund UI (DONE - Feb 13, 2026)
+
+**Cron Jobs (Running Daily at 17:00 UTC):**
+- ✅ send-draft-confirmation - Auto-sends ALL pending drafts + manual "Send Now" available
+- ✅ send-reminders - Sends "tomorrow's appointments" style reminders (Pro only)
+- ✅ sync-calendar - Syncs all connected calendars + on-demand dashboard sync
+- ✅ check-usage - Warns Starter users approaching 30/month limit
+- ✅ check-expiring-authorizations - Renews PaymentIntents expiring within 24 hours
 
 ---
 
