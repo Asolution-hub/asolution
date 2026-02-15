@@ -163,48 +163,66 @@ App/attenda/
 - `/api/profile/export` - GDPR data export (JSON)
 - `/api/profile/delete` - Account deletion (7-year financial retention)
 
-### Cron Jobs (Vercel Free Tier)
+### Cron Jobs (cron-job.org)
 
-**✅ Running Daily at 17:00 UTC**
+**✅ Running on cron-job.org (Free Tier)** - Configured Feb 15, 2026
 
-All cron jobs adapted for Vercel free tier limitations (once daily, ±59 min precision).
+All 6 cron jobs configured with optimal frequencies for real-time SaaS experience.
 
 **Jobs:**
 1. **send-draft-confirmation** (`/api/cron/send-draft-confirmation`)
-   - Sends ALL pending draft confirmations
-   - Manual "Send Now" button available in dashboard
+   - **Schedule**: Every 30 minutes (`*/30 * * * *`)
+   - Sends confirmations ONLY after 10-minute draft window expires
+   - Manual "Send Now" button bypasses draft window
    - Respects Starter 30/month limit
-   - Daily auto-send for both Starter and Pro
+   - 48 executions/day
 
 2. **send-reminders** (`/api/cron/send-reminders`)
+   - **Schedule**: Every hour (`0 * * * *`)
    - Sends reminders for appointments in next 24 hours
    - "Tomorrow's schedule" style (not "1 hour before")
-   - Pro users only
-   - Skips if reminder already sent
+   - Pro users only, skips if reminder already sent
+   - 24 executions/day
 
 3. **sync-calendar** (`/api/cron/sync-calendar`)
+   - **Schedule**: Every hour (`0 * * * *`)
    - Syncs Google/Microsoft calendars for all connected users
    - Fetches events from last 24h and next 7 days
    - Also syncs on-demand when dashboard loads
-   - Manual "Sync Now" button available
+   - 24 executions/day
 
-4. **check-usage** (`/api/cron/check-usage`)
-   - Warns Starter users at 25/30 appointments
-   - Once per month warning limit
-   - Email notification sent via Resend
-
-5. **check-expiring-authorizations** (`/api/cron/check-expiring-authorizations`)
+4. **check-expiring-authorizations** (`/api/cron/check-expiring-authorizations`)
+   - **Schedule**: Every 6 hours (`0 */6 * * *`)
    - Renews PaymentIntents expiring within 24 hours
    - PaymentIntents expire after 7 days
    - Critical for bookings >7 days away
-   - Creates new authorization, notifies client
+   - 4 executions/day
 
-**Security:** All cron routes require `x-cron-secret` header matching `CRON_SECRET` env var.
+5. **check-usage** (`/api/cron/check-usage`)
+   - **Schedule**: Daily at 09:00 UTC (`0 9 * * *`)
+   - Warns Starter users at 25/30 appointments
+   - Once per month warning limit
+   - Email notification sent via Resend
+   - 1 execution/day
 
-**Upgrade Path:** When upgrading to Vercel Pro ($20/month), can increase frequency:
-- send-draft-confirmation: Every 15 min
-- sync-calendar: Every 15-30 min
-- send-reminders: Every hour (1 hour before style)
+6. **auto-confirm** (`/api/cron/auto-confirm`)
+   - **Schedule**: Daily at 17:00 UTC (`0 17 * * *`)
+   - Currently disabled in code (replaced by draft flow)
+   - 1 execution/day
+
+**Total**: ~102 executions/day (vs 6/day with Vercel free tier = 17x improvement)
+
+**Security:** All cron routes require `Authorization: Bearer <CRON_SECRET>` header.
+
+**Monitoring:** Email notifications configured for:
+- Execution failures (immediate alert)
+- Recovery after failure (confirmation)
+- Auto-disable warning (critical alert)
+
+**Configuration Docs:**
+- `CRON_SETUP_GUIDE.md` - Complete setup instructions
+- `CRON_QUICK_REFERENCE.md` - Copy-paste values for cron-job.org
+- `CRON_VERIFICATION_CHECKLIST.md` - Testing and monitoring guide
 
 ---
 
@@ -267,7 +285,7 @@ All cron jobs adapted for Vercel free tier limitations (once daily, ±59 min pre
 
 ### Booking States
 
-**Draft:** Confirmation NOT sent yet. Draft window = configurable minutes. During draft: business can edit protection rules (Pro only) and manually send confirmation. After draft expires: Starter auto-sends once, Pro auto-sends + optional auto-resend.
+**Draft:** Confirmation NOT sent yet. Draft window = 10 minutes. During draft: business can edit protection rules (Pro only) and manually send confirmation. After draft expires: cron auto-sends (next run within 30 min). Manual send bypasses draft window.
 
 **Pending:** Confirmation sent, waiting for customer confirmation. Payment authorization may or may not be completed.
 
@@ -689,7 +707,7 @@ Required in `.env.local` (all configured in Vercel):
 
 | Feature | Status |
 |---------|--------|
-| **Cron scheduler** | ✅ DONE (Feb 13, 2026) - 5 jobs running daily on Vercel free tier at 17:00 UTC |
+| **Cron scheduler** | ✅ DONE (Feb 15, 2026) - 6 jobs running on cron-job.org with optimal frequencies |
 | **Dispute/refund UI** | ✅ DONE (Feb 13, 2026) - Modal with active disputes, evidence deadlines, past disputes summary |
 
 ### 🟡 High Priority (Post-Launch Week 1)
@@ -712,26 +730,32 @@ Required in `.env.local` (all configured in Vercel):
 
 ### Launch Readiness: ~98% Complete
 
-**Recent Updates (Feb 13, 2026):**
+**Recent Updates (Feb 15, 2026):**
+- ✅ Cron jobs migrated to cron-job.org with optimal frequencies (17x improvement)
+- ✅ Draft window logic fixed (10-minute grace period before auto-send)
+- ✅ All 6 cron jobs tested and operational
+- ✅ Email notifications configured for cron failures
+- ✅ Database migrations completed (reminder_sent_at, usage_warning_sent_at, booking_confirmations columns)
+
+**Previous Updates (Feb 13, 2026):**
 - ✅ Sentry monitoring fully implemented and tested (client + server + edge)
 - ✅ Dispute/refund UI completed in dashboard
-- ✅ Cron jobs adapted for Vercel free tier (daily execution at 17:00 UTC)
-- ✅ All 5 cron jobs enabled and running in production
 - ✅ Opengraph images fixed (display flex errors resolved)
 
 **Ready to launch** after:
-1. ✅ Database migrations deployed (DONE - Feb 13, 2026)
-2. ✅ Set up cron scheduler (DONE - Feb 13, 2026) - 5 jobs running daily on Vercel free
+1. ✅ Database migrations deployed (DONE - Feb 15, 2026)
+2. ✅ Set up cron scheduler (DONE - Feb 15, 2026) - cron-job.org configured
 3. ✅ Configure Sentry monitoring (DONE - Feb 13, 2026)
 4. ⏳ Test complete payment flow with test connected account
 5. ✅ Add basic dispute/refund UI (DONE - Feb 13, 2026)
 
-**Cron Jobs (Running Daily at 17:00 UTC):**
-- ✅ send-draft-confirmation - Auto-sends ALL pending drafts + manual "Send Now" available
-- ✅ send-reminders - Sends "tomorrow's appointments" style reminders (Pro only)
-- ✅ sync-calendar - Syncs all connected calendars + on-demand dashboard sync
-- ✅ check-usage - Warns Starter users approaching 30/month limit
-- ✅ check-expiring-authorizations - Renews PaymentIntents expiring within 24 hours
+**Cron Jobs (Running on cron-job.org):**
+- ✅ send-draft-confirmation - Every 30 min (48x/day) - sends after 10-min draft window
+- ✅ send-reminders - Every hour (24x/day) - Pro users only
+- ✅ sync-calendar - Every hour (24x/day) - keeps events up-to-date
+- ✅ check-expiring-authorizations - Every 6 hours (4x/day) - prevents PaymentIntent expiry
+- ✅ check-usage - Daily at 09:00 UTC (1x/day) - warns Starter users at 25/30
+- ✅ auto-confirm - Daily at 17:00 UTC (1x/day) - disabled in code (legacy)
 
 ---
 
