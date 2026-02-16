@@ -523,20 +523,42 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
   - Callback route verifies state signature to ensure legitimate user initiated the flow
   - **IMPORTANT**: Session verification was incorrectly added during security audit (Feb 13) and has been removed
 - **OAuth Status Routes** (`/api/google/status`, `/api/microsoft/status`):
-  - ✅ **No session verification** - protected by UUID validation + Redis rate limiting + database RLS policies
+  - ✅ **No session verification OR rate limiting** - protected by UUID validation + database RLS policies only
   - Using `supabaseAdmin` with RLS policies ensures users can only see their own connections
+  - **IMPORTANT**: Redis rate limiting removed (Feb 16) - not needed for read-only status checks, causes warnings if Redis not configured
   - **IMPORTANT**: Session verification breaks status checks and was removed (Feb 13)
 - **OAuth Callback Routes** (`/api/google/callback`, `/api/microsoft/callback`):
   - Verify OAuth state signature (prevents CSRF attacks)
   - Extract userId from verified state parameter
+  - Set `status: "connected"` when creating/updating connection (critical for disconnect/reconnect flow)
   - Encrypt tokens with AES-256-GCM before storing in database
+- **OAuth Disconnect Routes** (`/api/google/disconnect`, `/api/microsoft/disconnect`):
+  - ✅ **Requires authentication** - MUST include `Authorization: Bearer <token>` header
+  - Soft delete: Sets `status: "disconnected"` (does NOT delete row)
+  - Frontend MUST get Supabase session and include auth headers (see Settings page pattern)
+  - Frontend MUST check response status before updating UI state
 
 **Data Architecture:**
 - Provider-agnostic design using unified `google_connections` table with `provider` column
 - Both Google and Microsoft can be connected simultaneously
 - Events synced in parallel from both providers, merged in dashboard calendar view
+- **Status column**: `'connected'` (active) or `'disconnected'` (soft deleted) - added in migration 006
 - Auto-disconnect on `invalid_grant` errors
 - Token encryption with AES-256-GCM before database storage (MANDATORY)
+
+**Disconnect/Reconnect Flow (CRITICAL):**
+1. **Disconnect**: User clicks "Disconnect" → API sets `status = 'disconnected'` → UI updates to "Connect"
+2. **Status Check**: `/api/google/status` fetches row, checks if `status === 'disconnected'`, returns `{ connected: false }`
+3. **Reconnect**: User clicks "Connect" → OAuth flow → callback sets `status = 'connected'` → UI shows "Connected"
+4. **Common Bug**: If disconnect API doesn't include auth headers, returns 401 Unauthorized but UI still updates (silent error)
+5. **Fix**: Always include auth headers from Supabase session in disconnect calls (see SettingsContent.tsx pattern)
+
+**Event Deletion Sync:**
+- Google/Microsoft events route fetches current calendar events
+- Compares with existing Attenda bookings in same time range
+- Deletes orphaned bookings that no longer exist in calendar
+- Handles cascade deletes for confirmations, attendance, protections
+- Sync runs on dashboard load + hourly cron job
 
 **Planned:** Apple Calendar integration
 
@@ -778,10 +800,27 @@ Required in `.env.local` (all configured in Vercel):
   - OAuth state parameter (HMAC-signed) provides CSRF protection
   - Session verification breaks the OAuth flow (incorrectly added Feb 13, removed same day)
   - Callback route verifies state signature to ensure legitimate user initiated flow
-- **✅ CRITICAL - Status Routes**: NEVER add session verification to `/api/google/status` or `/api/microsoft/status`
-  - Protected by: UUID validation + Redis rate limiting + database RLS policies
+- **✅ CRITICAL - Status Routes**: NEVER add session verification OR rate limiting to `/api/google/status` or `/api/microsoft/status`
+  - Protected by: UUID validation + database RLS policies ONLY
+  - **Redis rate limiting removed** (Feb 16) - causes "Redis not configured" warnings and is unnecessary for read-only status checks
   - Session verification breaks status checks and prevents "Connected" badge from showing
   - Using `supabaseAdmin` with RLS ensures users can only see their own connections
+- **✅ CRITICAL - Disconnect Routes**: `/api/google/disconnect` and `/api/microsoft/disconnect` REQUIRE authentication
+  - MUST include `Authorization: Bearer <token>` header from Supabase session
+  - MUST include `credentials: 'include'` in fetch options
+  - Frontend MUST check `res.ok` before updating UI state (don't silently ignore errors)
+  - Common bug: Calling disconnect without auth headers → 401 Unauthorized → UI shows disconnected but DB not updated
+  - See `SettingsContent.tsx` disconnect handlers for correct pattern
+- **✅ CRITICAL - Callback Routes**: MUST set `status: 'connected'` when creating/updating connection
+  - Without this, reconnecting a disconnected calendar keeps `status: 'disconnected'` → status check fails
+  - Migration 006 added `status` column with default `'connected'`
+- **✅ CRITICAL - Status Column**: `google_connections` table has `status` column (`'connected'` or `'disconnected'`)
+  - Run migration `006-add-status-column.sql` in Supabase if not already done
+  - Status routes check `if (data.status === 'disconnected')` in code, not query filter (more reliable with NULL values)
+- **✅ CRITICAL - Event Deletion Sync**: Calendar sync routes delete orphaned Attenda bookings
+  - Fetches current Google/Microsoft events, compares with DB bookings in same time range
+  - Deletes bookings for events no longer in calendar (handles cascade deletes)
+  - Without this, deleting events in Google Calendar leaves them in Attenda dashboard
 - **Query Param Handling**: Settings page useEffects must preserve other query params when clearing their own (e.g., subscription success, upgrade, OAuth callback)
 - **PaymentIntent expiry**: Auth expires after 7 days, must renew for bookings >7 days away
 - **Multi-currency**: Always store currency with amount. Display correct symbol based on user's country.
@@ -790,7 +829,8 @@ Required in `.env.local` (all configured in Vercel):
 - **`profiles` table has NO `email` column** — get email from `user` object (via `getAuthenticatedUser()`)
 - **RLS Migration**: `005-enable-rls-policies-SAFE-RERUN.sql` covers all 17 tables (deployed Feb 13, 2026)
 - **`appointment_attendance` and `appointment_no_show_overrides`** use `user_id` directly, NOT `booking_id`. RLS policies must use `auth.uid() = user_id`
-- **Migrations deployed:** 001-stripe-connect, 002-webhook-system, 003-refunds-disputes, 004-gdpr-compliance, 005-enable-rls-policies-SAFE-RERUN
+- **`google_connections` status column**: Added in migration 006 (Feb 16, 2026) - tracks `'connected'` or `'disconnected'` state for calendar connections
+- **Migrations deployed:** 001-stripe-connect, 002-webhook-system, 003-refunds-disputes, 004-gdpr-compliance, 005-enable-rls-policies-SAFE-RERUN, 006-add-status-column
 
 ### Development
 - **Timezone dates**: Always use `toLocalDateStr()`, never `toISOString().split("T")[0]`
