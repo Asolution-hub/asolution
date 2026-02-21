@@ -69,11 +69,6 @@ This file provides guidance to Claude Code when working with this repository.
 5. Can create events but can't send confirmations until verified
 6. Email notification when verified
 
-**Key database fields:**
-- `stripe_account_id`, `stripe_account_status`, `onboarding_completed`
-- `business_name`, `business_address`, `business_vat`, `business_country`
-- `currency` ('eur' | 'usd' based on country)
-
 ---
 
 ## 3. Tech Stack & Commands
@@ -118,21 +113,24 @@ App/attenda/
 └── migrations/           # SQL migrations
 ```
 
-### Key Libraries
+### Key Files
 
 **Auth & Security:**
 - `lib/auth.ts` - verifyUserAccess, verifyCronSecret, verifyInternalSecret, verifyOrigin
-- `lib/validation.ts` - UUID/input validation, rate limiting, sanitization, timing protection
+- `lib/validation.ts` - UUID/input validation, sanitization, timing protection (**NOT** for rate limiting — use `lib/rateLimit.ts`)
 - `lib/encryption.ts` - AES-256-GCM token encryption
+- `lib/rateLimit.ts` - Redis-based rate limiting (Upstash) — ALWAYS use this, never in-memory
+- `proxy.ts` - Security headers, CSP, HSTS, X-Frame-Options (Next.js 16 uses `proxy.ts`, NOT `middleware.ts`)
 
 **Integrations:**
 - `lib/googleAuth.ts` - OAuth2 client with encrypted token storage
+- `lib/microsoftAuth.ts` - Microsoft Graph API client
 - `lib/stripe.ts` - Stripe Connect helpers
 - `lib/email.ts` - Resend email sender
 - `lib/sms.ts` - Twilio SMS (planned)
 
 **Business Logic:**
-- `lib/noShowRules.ts` - Resolves global + per-appointment rule overrides
+- `lib/noShowRules.ts` - Resolves global + per-appointment rule overrides. Defines: `DEFAULT_NO_SHOW_FEE_CENTS = 2000`, `DEFAULT_GRACE_PERIOD_MINUTES = 10`, `DEFAULT_LATE_CANCEL_HOURS = 24`
 - `lib/contactParser.ts` - Extracts email/phone from event text
 - `lib/plans.ts` - Plan configuration (Starter/Pro/Business)
 - `lib/currency.ts` - Multi-currency support (EUR/USD)
@@ -165,64 +163,17 @@ App/attenda/
 
 ### Cron Jobs (cron-job.org)
 
-**✅ Running on cron-job.org (Free Tier)** - Configured Feb 15, 2026
+All 5 jobs are live. All require `Authorization: Bearer <CRON_SECRET>` header (POST only).
 
-All 6 cron jobs configured with optimal frequencies for real-time SaaS experience.
+| Job | Schedule | Purpose |
+|-----|----------|---------|
+| `send-draft-confirmation` | Every 30 min | Sends confirmations after 10-min draft window; respects Starter 30/month limit |
+| `send-reminders` | Every hour | Reminders for next-24h appointments; Pro users only |
+| `sync-calendar` | Every hour | Syncs Google/Microsoft for all users; also runs on dashboard load |
+| `check-expiring-authorizations` | Every 6 hours | Renews PaymentIntents expiring within 24h (PIs expire after 7 days) |
+| `check-usage` | Daily 09:00 UTC | Warns Starter users at 25/30 appointments; once/month limit |
 
-**Jobs:**
-1. **send-draft-confirmation** (`/api/cron/send-draft-confirmation`)
-   - **Schedule**: Every 30 minutes (`*/30 * * * *`)
-   - Sends confirmations ONLY after 10-minute draft window expires
-   - Manual "Send Now" button bypasses draft window
-   - Respects Starter 30/month limit
-   - 48 executions/day
-
-2. **send-reminders** (`/api/cron/send-reminders`)
-   - **Schedule**: Every hour (`0 * * * *`)
-   - Sends reminders for appointments in next 24 hours
-   - "Tomorrow's schedule" style (not "1 hour before")
-   - Pro users only, skips if reminder already sent
-   - 24 executions/day
-
-3. **sync-calendar** (`/api/cron/sync-calendar`)
-   - **Schedule**: Every hour (`0 * * * *`)
-   - Syncs Google/Microsoft calendars for all connected users
-   - Fetches events from last 24h and next 7 days
-   - Also syncs on-demand when dashboard loads
-   - 24 executions/day
-
-4. **check-expiring-authorizations** (`/api/cron/check-expiring-authorizations`)
-   - **Schedule**: Every 6 hours (`0 */6 * * *`)
-   - Renews PaymentIntents expiring within 24 hours
-   - PaymentIntents expire after 7 days
-   - Critical for bookings >7 days away
-   - 4 executions/day
-
-5. **check-usage** (`/api/cron/check-usage`)
-   - **Schedule**: Daily at 09:00 UTC (`0 9 * * *`)
-   - Warns Starter users at 25/30 appointments
-   - Once per month warning limit
-   - Email notification sent via Resend
-   - 1 execution/day
-
-6. **auto-confirm** (`/api/cron/auto-confirm`)
-   - **Schedule**: Daily at 17:00 UTC (`0 17 * * *`)
-   - Currently disabled in code (replaced by draft flow)
-   - 1 execution/day
-
-**Total**: ~102 executions/day (vs 6/day with Vercel free tier = 17x improvement)
-
-**Security:** All cron routes require `Authorization: Bearer <CRON_SECRET>` header.
-
-**Monitoring:** Email notifications configured for:
-- Execution failures (immediate alert)
-- Recovery after failure (confirmation)
-- Auto-disable warning (critical alert)
-
-**Configuration Docs:**
-- `CRON_SETUP_GUIDE.md` - Complete setup instructions
-- `CRON_QUICK_REFERENCE.md` - Copy-paste values for cron-job.org
-- `CRON_VERIFICATION_CHECKLIST.md` - Testing and monitoring guide
+Note: `auto-confirm` route exists but is disabled in code (replaced by draft flow).
 
 ---
 
@@ -295,6 +246,11 @@ All 6 cron jobs configured with optimal frequencies for real-time SaaS experienc
 
 Each booking has: no-show fee (currency minor units), grace period (minutes), late cancellation window (hours).
 
+**Default values** (defined in `lib/noShowRules.ts` — use these constants, never hardcode):
+- `DEFAULT_NO_SHOW_FEE_CENTS = 2000` (€20 / $20)
+- `DEFAULT_GRACE_PERIOD_MINUTES = 10`
+- `DEFAULT_LATE_CANCEL_HOURS = 24`
+
 - **Starter**: Global protection rules only, cannot edit per booking
 - **Pro**: Can override protection rules per booking
 - **Important**: Overrides locked once confirmation is sent
@@ -303,17 +259,22 @@ Each booking has: no-show fee (currency minor units), grace period (minutes), la
 
 Sent automatically (after draft window) or manually (dashboard button). Creates `booking_confirmation` record, generates unique token, sends email/SMS.
 
+**Verification gate (enforced at every send path):** `onboarding_completed = true` is required before any confirmation is sent. This is checked in:
+1. `/api/bookings/send-confirmation` — dashboard "Send" button
+2. `/api/bookings/send-draft-confirmation` — dashboard draft send
+3. `/api/bookings/resend-confirmation` — dashboard "Resend" button
+4. `/api/cron/send-draft-confirmation` — hourly cron auto-send
+5. `/api/notifications/send` — final safety net at bottom of call chain
+
+Non-verified users (Starter or Pro who haven't completed Stripe Connect) can create events but cannot send any notifications. The UI must also disable send buttons for non-verified users, but the API enforces this regardless.
+
 **Confirmation message must include:** Event details, no-show fee, cancellation window, "Your card will be authorized, not charged", Stripe authorization link (Card/Apple Pay/Google Pay).
 
 ### Stripe Authorization (Customer Side)
 
 PaymentIntent created **on business's connected account**, authorization only — no funds captured. Supported: Card, Apple Pay, Google Pay. Failed attempts tracked, business notified after 3 failures.
 
-**PaymentIntent expiration:**
-- PIs expire after 7 days
-- Cron job monitors expiring authorizations
-- Auto-renew if appointment still upcoming
-- Notify client to re-authorize if needed
+PaymentIntents expire after 7 days. Cron job monitors and auto-renews for upcoming appointments; notifies client to re-authorize if needed.
 
 ### Event Day Logic
 
@@ -330,16 +291,9 @@ PaymentIntent created **on business's connected account**, authorization only �
 
 ### Refunds & Disputes
 
-**Refunds:**
-- Business can issue full/partial refund via "Issue Refund" button
-- Tracked in `stripe_refunds` table
-- Client notified via email
+**Refunds:** Business issues full/partial refund via "Issue Refund" button. Tracked in `stripe_refunds`. Client notified via email.
 
-**Disputes/Chargebacks:**
-- Tracked in `stripe_disputes` table
-- Business notified immediately
-- Evidence due date tracked
-- Dashboard shows active disputes with links to Stripe Dashboard
+**Disputes/Chargebacks:** Tracked in `stripe_disputes`. Business notified immediately. Track `evidence_due_by` dates — business has limited time to respond with evidence.
 
 ---
 
@@ -347,14 +301,9 @@ PaymentIntent created **on business's connected account**, authorization only �
 
 ### Navigation
 
-- **Sidebar** (desktop >=900px): Redesigned with premium aesthetic
-  - Expanded: 260px, collapsed: 72px (state in localStorage)
-  - Logo: Gradient icon matching landing page
-  - Account card: Avatar, display name, Pro badge, email
-  - Create Event button, Usage counter (Starter), Navigation, Upgrade button (Starter)
-  - Theme toggle, Log out, Help center, Collapse toggle
-
-- **Mobile (<900px)**: Sidebar hidden, `DashboardHeader` conditionally rendered only after client-side mount check
+- **Sidebar** (desktop >=900px): Expanded 260px / collapsed 72px (state in localStorage)
+  - Logo, account card (avatar, display name, Pro badge, email), Create Event button, Usage counter (Starter), navigation, Upgrade button (Starter), theme toggle, log out, collapse toggle
+- **Mobile (<900px)**: Sidebar hidden, `DashboardHeader` conditionally rendered only after client-side mount check (prevents flash bug)
 - **Key files**: `DashboardContext.tsx`, `Sidebar.tsx`, `DashboardHeader.tsx`
 
 ### Layout
@@ -414,72 +363,50 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 
 ### Authentication
 - Supabase authentication (magic links + Google OAuth + Microsoft Azure OAuth login)
-- **Login Providers:**
-  - Magic link (email)
-  - Google OAuth (Supabase Google provider) ✅
-  - Microsoft OAuth (Supabase Azure provider) ✅
-- **Calendar OAuth:** Google Calendar and Microsoft Outlook Calendar OAuth for calendar integration (separate from login OAuth apps, token refresh and expiry tracking implemented) ✅
+- **Login providers**: Magic link, Google OAuth (Supabase Google provider), Microsoft OAuth (Supabase Azure provider)
+- **Calendar OAuth**: Separate from login — Google Calendar and Microsoft Outlook OAuth for calendar sync (token refresh + expiry tracked)
 - Session management via Supabase cookies
-- Admin routes protected by email whitelist
+- Admin routes protected by `ADMIN_EMAILS` whitelist
 
 ### Security Architecture
 
-**✅ Production Hardened (Feb 13, 2026)** - Comprehensive security audit completed and all critical/high-priority vulnerabilities fixed.
-
-**Row Level Security (RLS):** All 17 tables protected with user-scoped RLS policies using `auth.uid()`. Users can only access their own data. Migration: `migrations/005-enable-rls-policies-SAFE-RERUN.sql` (deployed Feb 13, 2026). Core tables: profiles, calendar_bookings, booking_confirmations, google_connections, no_show_settings, appointment_no_show_overrides, appointment_attendance, clients. New tables: stripe_refunds, stripe_disputes, user_data_exports, account_deletions, plus 5 service-role-only tables.
+**Row Level Security (RLS):** All tables protected with user-scoped RLS policies using `auth.uid()`. Migration `005-enable-rls-policies-SAFE-RERUN.sql` covers 17 tables; migration `007-booking-protections-rls.sql` covers `booking_protections` (added 2026-02-21).
 
 **API Route Protection:**
 - **Admin Routes**: Email whitelist authentication required (`/api/admin/reconcile`, `/api/admin/webhooks`)
 - **User Routes**: `verifyUserAccess()` validates authentication + user ownership
-- **OAuth Connect Routes**: No session verification - HMAC-signed OAuth state provides CSRF protection (`/api/google/connect`, `/api/microsoft/connect`)
-- **OAuth Status Routes**: No session verification - protected by UUID validation + rate limiting + database RLS (`/api/google/status`, `/api/microsoft/status`)
+- **OAuth Connect Routes** (`/api/google/connect`, `/api/microsoft/connect`): Session verification via cookie-based auth — verifies session matches `userId` param (prevents OAuth session fixation)
+- **OAuth Status Routes** (`/api/google/status`, `/api/microsoft/status`): Session verification required — `SettingsContent.tsx` must include `Authorization: Bearer` header when calling these
+- **OAuth Disconnect Routes**: **Requires authentication** — MUST include `Authorization: Bearer <token>` header
 - **Debug Endpoints**: Return 404 in production (`/api/debug-auth`, `/api/sentry-test-error`)
 - **Health Endpoint**: Detailed metrics restricted to admin users only
-- **CSRF Protection**: `verifyOrigin()` on ALL state-changing POST endpoints
+- **CSRF Protection**: `verifyOrigin()` on ALL state-changing POST endpoints (including `/api/bookings/confirm` and `/api/stripe/create-authorization`)
 - **UUID Validation**: All route parameters validated with `isValidUUID()`
-- **Confirmation Page**: Server-side UUID validation on token parameter
+- **Confirmation Page**: Server-side UUID validation + 24h expiry check before rendering Stripe form
 
-**Rate Limiting (Redis-based via Upstash):**
-- **✅ Migration Complete**: All 37 API routes migrated from ineffective in-memory to Redis-based rate limiting (Feb 13, 2026)
-- **Confirmation endpoints**: 10 req/min (`confirmation` limiter)
-- **Stripe operations**: 20 req/min (`stripe` limiter)
-- **Refund operations**: 5 req/min (`refund` limiter)
-- **General API**: 60 req/min (`api` limiter)
-- **Auth endpoints**: 5 req/min (`auth` limiter)
-- **Webhooks**: 100 req/min (`webhook` limiter)
-- **Critical**: In-memory rate limiting is ineffective in serverless environments (each function instance has separate memory)
+**Rate Limiting (Redis via Upstash):**
+- Confirmation: 10 req/min | Stripe: 20 req/min | Refund: 5 req/min | General API: 60 req/min | Auth: 5 req/min | Webhooks: 100 req/min
+- **Critical**: In-memory rate limiting is ineffective in serverless — ALWAYS use `@/lib/rateLimit`, NEVER `checkRateLimitInMemory_NOT_FOR_PRODUCTION` from `@/lib/validation`
 
-**Default Values (Centralized):**
-- **No-show fee**: `DEFAULT_NO_SHOW_FEE_CENTS = 2000` (€20.00 / $20.00) in `lib/noShowRules.ts`
-- **Grace period**: `DEFAULT_GRACE_PERIOD_MINUTES = 10`
-- **Late cancel**: `DEFAULT_LATE_CANCEL_HOURS = 24`
-- All routes use these constants (no hardcoded values)
-
-**Token Security:** OAuth tokens encrypted with AES-256-GCM (MANDATORY). Cron jobs via `verifyCronSecret()`. Internal calls via `verifyInternalSecret()`. Token enumeration prevented via `constantTimeDelay()`. Server-side 24h confirmation token expiration.
-
-**Payment Security:** PaymentIntent IDs NEVER accepted from client — always read from database. All payments go through connected accounts. Stripe error details not exposed. Auto-resend capped at 3 attempts per booking. Failed authorization attempts tracked.
+**Token & Payment Security:**
+- OAuth tokens encrypted with AES-256-GCM (MANDATORY)
+- PaymentIntent IDs NEVER accepted from client — always read from database
+- Cron auth: `verifyCronSecret()`. Internal calls: `verifyInternalSecret()`
+- Token enumeration prevented via `constantTimeDelay()`
+- Server-side 24h confirmation token expiration
+- Auto-resend capped at 3 attempts per booking
 
 **Input Sanitization:** `sanitizeString()` for all user-controlled text (business names, display names, settings). `sanitizeForSMS()` for SMS (removes Unicode direction overrides, zero-width chars).
 
-**Production Hardening:** Test endpoints return 404 in production. `devLog()` suppresses sensitive logging. SMS mock returns failure in production. Cron routes POST-only with secret auth. Webhook idempotency via `stripe_webhook_events` table using atomic INSERT operations.
-
-**Headers & CSP:** Security headers in `middleware.ts`. Strict CSP (no unsafe-eval). HSTS enabled. X-Frame-Options: DENY. TODO: Replace 'unsafe-inline' with nonces.
+**Headers & CSP:** Strict CSP (no unsafe-eval). HSTS enabled. X-Frame-Options: DENY. Applied via `proxy.ts` (Next.js 16 middleware file — do NOT create `middleware.ts`). TODO: Replace 'unsafe-inline' with nonces.
 
 ### Security Rules
-- Never trust client input - all inputs sanitized
+- Never trust client input — all inputs sanitized
 - All critical logic server-side
-- All secrets via environment variables (never NEXT_PUBLIC_)
-- Calendar data isolated per user via RLS policies
+- All secrets via environment variables (never `NEXT_PUBLIC_`)
 - Webhook signature verification mandatory
 - Rate limiting on all public endpoints (Redis-based)
 - GDPR compliance: data export and account deletion with 7-year financial record retention
-
-### Key Security Files
-- `lib/auth.ts` - Authentication, authorization, CSRF, OAuth state
-- `lib/validation.ts` - Input validation, rate limiting, sanitization, timing protection
-- `lib/encryption.ts` - Token encryption utilities
-- `lib/rateLimit.ts` - Redis-based rate limiting (Upstash)
-- `middleware.ts` - Security headers, CSP, admin auth
 
 ---
 
@@ -491,115 +418,51 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 - **Starter**: "via Attenda" footer, Attenda branding
 - **Pro**: Optional white-label (business name, business logo, remove Attenda branding)
 
-**Implemented Templates:**
-- Booking Confirmation, Booking Reminder (Pro only)
-- No-Show Receipt, Refund Issued
-- Welcome Starter, Welcome Pro, Usage Warning (25/30)
+**Implemented Templates:** Booking Confirmation, Booking Reminder (Pro only), No-Show Receipt, Refund Issued, Welcome Starter, Welcome Pro, Usage Warning (25/30)
 
-**Planned Templates:**
-- Account Verified, Account Restricted, Dispute Created
-- Calendar Disconnected, Reauthorization Required, Payment Failed
-
-**Cron jobs** (`/api/cron/*`): Routes use POST with `CRON_SECRET` auth. Need external scheduler (Vercel Hobby plan limitation).
+**Planned Templates:** Account Verified, Account Restricted, Dispute Created, Calendar Disconnected, Reauthorization Required, Payment Failed
 
 ### Calendar Integrations
 
-**✅ Fully Implemented:**
-- **Google Calendar**: OAuth2 with token refresh, expiry tracking, full CRUD operations
-  - Routes: `/api/google/connect`, `/callback`, `/status`, `/disconnect`, `/events`
-  - Library: Native Google APIs client (`googleapis` package)
-  - Settings UI: Connect/Disconnect with status indicator
+**Google Calendar:** OAuth2 via `googleapis` package. Routes: `/api/google/{connect,callback,status,disconnect,events}`. Library: `lib/googleAuth.ts`.
 
-- **Microsoft Outlook Calendar**: OAuth2 with Microsoft Graph API, token refresh, full CRUD operations
-  - Routes: `/api/microsoft/connect`, `/callback`, `/status`, `/disconnect`, `/events`
-  - Library: `lib/microsoftAuth.ts` (Microsoft Graph API client)
-  - Settings UI: Connect/Disconnect with status indicator
-  - Setup guide: `docs/MICROSOFT_SETUP.md` (Azure Entra ID configuration)
+**Microsoft Outlook Calendar:** OAuth2 via Microsoft Graph API. Routes: `/api/microsoft/{connect,callback,status,disconnect,events}`. Library: `lib/microsoftAuth.ts`. Setup: `docs/MICROSOFT_SETUP.md`.
 
-**Security Architecture:**
-- **OAuth Connect Routes** (`/api/google/connect`, `/api/microsoft/connect`):
-  - ✅ **No session verification** - HMAC-signed OAuth state parameter provides CSRF protection
-  - State parameter cryptographically signed with `OAUTH_STATE_SECRET`
-  - Callback route verifies state signature to ensure legitimate user initiated the flow
-  - **IMPORTANT**: Session verification was incorrectly added during security audit (Feb 13) and has been removed
-- **OAuth Status Routes** (`/api/google/status`, `/api/microsoft/status`):
-  - ✅ **No session verification OR rate limiting** - protected by UUID validation + database RLS policies only
-  - Using `supabaseAdmin` with RLS policies ensures users can only see their own connections
-  - **IMPORTANT**: Redis rate limiting removed (Feb 16) - not needed for read-only status checks, causes warnings if Redis not configured
-  - **IMPORTANT**: Session verification breaks status checks and was removed (Feb 13)
-- **OAuth Callback Routes** (`/api/google/callback`, `/api/microsoft/callback`):
-  - Verify OAuth state signature (prevents CSRF attacks)
-  - Extract userId from verified state parameter
-  - Set `status: "connected"` when creating/updating connection (critical for disconnect/reconnect flow)
-  - Encrypt tokens with AES-256-GCM before storing in database
-- **OAuth Disconnect Routes** (`/api/google/disconnect`, `/api/microsoft/disconnect`):
-  - ✅ **Requires authentication** - MUST include `Authorization: Bearer <token>` header
-  - Soft delete: Sets `status: "disconnected"` (does NOT delete row)
-  - Frontend MUST get Supabase session and include auth headers (see Settings page pattern)
-  - Frontend MUST check response status before updating UI state
+Both providers use the unified `google_connections` table (with `provider` column) and can be connected simultaneously. Events synced in parallel, merged in dashboard. Google login OAuth and Google Calendar OAuth are **separate apps** — both must be configured.
 
-**Data Architecture:**
-- Provider-agnostic design using unified `google_connections` table with `provider` column
-- Both Google and Microsoft can be connected simultaneously
-- Events synced in parallel from both providers, merged in dashboard calendar view
-- **Status column**: `'connected'` (active) or `'disconnected'` (soft deleted) - added in migration 006
-- Auto-disconnect on `invalid_grant` errors
-- Token encryption with AES-256-GCM before database storage (MANDATORY)
+**CRITICAL — OAuth Route Security:**
 
-**Disconnect/Reconnect Flow (CRITICAL):**
-1. **Disconnect**: User clicks "Disconnect" → API sets `status = 'disconnected'` → UI updates to "Connect"
-2. **Status Check**: `/api/google/status` fetches row, checks if `status === 'disconnected'`, returns `{ connected: false }`
-3. **Reconnect**: User clicks "Connect" → OAuth flow → callback sets `status = 'connected'` → UI shows "Connected"
-4. **Common Bug**: If disconnect API doesn't include auth headers, returns 401 Unauthorized but UI still updates (silent error)
-5. **Fix**: Always include auth headers from Supabase session in disconnect calls (see SettingsContent.tsx pattern)
+| Route type | Session required | Rate limited | Protection |
+|-----------|-----------------|--------------|-----------|
+| `/connect` | ✅ Yes | ❌ No | Session check (cookie-based) + HMAC-signed state |
+| `/status` | ✅ Yes | ❌ No | Session check + UUID validation |
+| `/callback` | ❌ No | ❌ No | Verifies OAuth state HMAC signature |
+| `/disconnect` | ✅ Yes | Yes | `Authorization: Bearer <token>` header |
 
-**Event Deletion Sync:**
-- Google/Microsoft events route fetches current calendar events
-- Compares with existing Attenda bookings in same time range
-- Deletes orphaned bookings that no longer exist in calendar
-- Handles cascade deletes for confirmations, attendance, protections
-- Sync runs on dashboard load + hourly cron job
+**`/connect` and `/status` require session verification** (added 2026-02-21 security audit). `/callback` does NOT — it uses HMAC state and has no session available. Browsers send auth cookies on GET navigation, so `/connect` session check works without Authorization header. **Never add session verification to `/callback`** — the user has no session at that point.
 
-**Planned:** Apple Calendar integration
+**Disconnect/Reconnect Flow:**
+1. Disconnect: API sets `status = 'disconnected'` in `google_connections`
+2. Status check: Returns `{ connected: false }` when `status === 'disconnected'` (code comparison, not query filter)
+3. Reconnect: OAuth callback MUST set `status = 'connected'` — without this, reconnect silently keeps `'disconnected'` status
+
+**Frontend disconnect pattern (`SettingsContent.tsx`):** Must include `Authorization: Bearer <token>` header AND `credentials: 'include'`, AND check `res.ok` before updating UI state — do not silently ignore 401 errors.
+
+**Event Deletion Sync:** Calendar sync compares current Google/Microsoft events with DB bookings in same time range. Orphaned bookings (deleted from source calendar) are deleted with cascade. Runs on dashboard load + hourly cron.
+
+**`google_connections` table:** Has `status` column (`'connected'` | `'disconnected'`). Migration `006-add-status-column.sql`. Auto-disconnects on `invalid_grant` errors.
 
 ### Sentry Monitoring
 
-**✅ Fully Implemented and Production-Ready**
+**Config files:** `sentry.client.config.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`, `instrumentation.ts`, `next.config.ts` (wrapped with `withSentryConfig`, tunnel route at `/monitoring`)
 
-**Configuration Files:**
-- `sentry.client.config.ts` - Client-side error tracking with Session Replay
-- `sentry.server.config.ts` - Server-side error tracking
-- `sentry.edge.config.ts` - Edge runtime error tracking
-- `instrumentation.ts` - Loads server/edge configs automatically
-- `next.config.ts` - Wrapped with `withSentryConfig`, tunnel route at `/monitoring`
-
-**Key Components:**
-- `app/components/SentryMonitoring.tsx` - Ensures client SDK loads on every page, exposes `window.Sentry` globally
-- `app/error.tsx` - Global error boundary that captures React errors
-- `proxy.ts` - Middleware excludes `/monitoring` route to allow Sentry tunnel
-
-**Features:**
-- ✅ Automatic error capture (client, server, edge)
-- ✅ Session Replay (100% on errors, 10% on normal sessions)
-- ✅ Tunnel route (`/monitoring`) bypasses ad-blockers
-- ✅ Source maps uploaded automatically in CI
-- ✅ Performance monitoring (tracesSampleRate: 1.0)
-- ✅ Tree-shaking removes debug logging in production
-
-**Testing:**
-```javascript
-// From browser console on attenda.app
-window.Sentry.captureMessage('Test message', 'error');
-throw new Error('Test error - ' + Date.now());
-```
+**Key components:** `app/components/SentryMonitoring.tsx` (loads SDK on every page), `app/error.tsx` (global error boundary), `proxy.ts` (excludes `/monitoring` from middleware)
 
 **Dashboard:** https://attenda.sentry.io/issues/?project=4510878977884240
 
-**Important Notes:**
-- Client config wrapped in `typeof window !== "undefined"` guard to prevent server-side execution
-- `replayIntegration` only available on client (not server/edge)
-- Middleware must exclude `/monitoring` or tunnel will fail
-- All errors appear in dashboard within 5 seconds
+**Notes:**
+- Client config uses `typeof window !== "undefined"` guard — `replayIntegration` only runs client-side
+- Middleware must exclude `/monitoring` route or Sentry tunnel will fail
 
 ---
 
@@ -615,7 +478,7 @@ Premium DataPulse-inspired design with Framer Motion animations and `prefers-red
 
 ### Blog & SEO
 
-- 9 SEO-optimized articles at `/blog/*` with BlogPosting JSON-LD schema
+- SEO-optimized articles at `/blog/*` with BlogPosting JSON-LD schema
 - Blog index at `/blog` with article cards
 - SEO: Google Search Console, Bing, sitemap, robots.txt, llms.txt, dynamic OG images, JSON-LD schemas
 - Blog link in: Header nav, hamburger menu, Footer
@@ -641,7 +504,7 @@ Premium DataPulse-inspired design with Framer Motion animations and `prefers-red
 | `stripe_webhook_events` | Idempotency log, retry tracking, error logging |
 | `payment_authorization_failures` | Failed auth attempts, error codes |
 
-### Notable `profiles` columns
+### Notable `profiles` Columns
 - `stripe_customer_id`, `stripe_subscription_id`, `subscription_status`
 - `stripe_account_id`, `stripe_account_status`, `onboarding_completed`
 - `business_name`, `business_address`, `business_country`, `business_vat`
@@ -649,24 +512,18 @@ Premium DataPulse-inspired design with Framer Motion animations and `prefers-red
 - `week_start_day`, `time_format`, `timezone`
 - `currency` (derived from business_country)
 - `deleted_at` (soft delete for GDPR)
-- **No `email` column** — get email from `user` object
+- **No `email` column** — get email from `user` object (via `getAuthenticatedUser()`)
 
-### Migrations (run in Supabase SQL Editor)
+### Migrations
 
-**✅ Deployed (Feb 13, 2026):**
-- `001-stripe-connect.sql` - Stripe Connect fields, business onboarding tables
-- `002-webhook-system.sql` - Webhook idempotency, payment failure tracking
-- `003-refunds-disputes.sql` - Refund/dispute management tables
-- `004-gdpr-compliance.sql` - Data export/deletion, anonymization functions
-- `005-enable-rls-policies-SAFE-RERUN.sql` - RLS on all 17 tables (8 core + 9 new)
-
-**Database Status:**
-- ✅ 17 tables with Row Level Security enabled
-- ✅ Stripe Connect columns in `profiles` table
-- ✅ Multi-currency support (EUR/USD)
-- ✅ GDPR compliance (export/delete/anonymize)
-- ✅ Webhook idempotency system
-- ✅ Dispute/refund tracking
+All deployed to Supabase (run in SQL Editor):
+- `001-stripe-connect.sql` — Stripe Connect fields, business onboarding tables
+- `002-webhook-system.sql` — Webhook idempotency, payment failure tracking
+- `003-refunds-disputes.sql` — Refund/dispute management tables
+- `004-gdpr-compliance.sql` — Data export/deletion, anonymization functions
+- `005-enable-rls-policies-SAFE-RERUN.sql` — RLS on all 17 tables
+- `006-add-status-column.sql` — `google_connections.status` column
+- `007-booking-protections-rls.sql` — RLS on `booking_protections` table (missing from 005; deployed 2026-02-21)
 
 ### Environment Variables
 
@@ -676,11 +533,7 @@ Required in `.env.local` (all configured in Vercel):
 
 **Google OAuth (Calendar):** `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`
 
-**Microsoft OAuth (Login + Calendar):**
-- `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET` - Also configured in Supabase Azure provider for login
-- `MICROSOFT_REDIRECT_URI` - For calendar integration: `https://attenda.app/api/microsoft/callback`
-- `MICROSOFT_TENANT_ID` - Set to `common` for multi-tenant support
-- **Note:** Login via Supabase Azure provider works. Calendar connect API routes exist but auth check fails.
+**Microsoft OAuth (Login + Calendar):** `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`, `MICROSOFT_REDIRECT_URI` (`https://attenda.app/api/microsoft/callback`), `MICROSOFT_TENANT_ID` (`common` for multi-tenant)
 
 **Email:** `RESEND_API_KEY`, `EMAIL_FROM`
 
@@ -690,9 +543,7 @@ Required in `.env.local` (all configured in Vercel):
 
 **App:** `NEXT_PUBLIC_APP_URL` (https://attenda.app)
 
-**Stripe:**
-- `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`
-- `STRIPE_PRO_PRICE_ID_EUR`, `STRIPE_PRO_PRICE_ID_USD`
+**Stripe:** `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID_EUR`, `STRIPE_PRO_PRICE_ID_USD`
 
 **Redis:** `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
 
@@ -706,131 +557,31 @@ Required in `.env.local` (all configured in Vercel):
 
 ---
 
-## 12. Production Status & Roadmap
-
-### ✅ Implemented
-- Dashboard UI (calendar, events, settings)
-- **Calendar integrations:** Google Calendar + Microsoft Outlook Calendar (OAuth2, token refresh, parallel sync)
-- **Stripe Connect:** Full implementation (onboarding, verification, connected accounts, webhook handlers)
-- **Business registration:** Complete flow with OnboardingBanner UI (pending/restricted/verified states)
-- **Payment flow:** PaymentIntents use `on_behalf_of` and `transfer_data` (money goes to business, not platform)
-- **Database migrations:** All 4 production migrations deployed + RLS policies on 17 tables
-- **Backend systems:** 6 cron routes (running daily on Vercel free tier), dispute/refund handlers, GDPR endpoints, admin reconciliation
-- **Cron jobs:** ✅ LIVE - 5 jobs running daily at 17:00 UTC (send-draft-confirmation, send-reminders, sync-calendar, check-usage, check-expiring-authorizations)
-- Email confirmations via Resend
-- Stripe subscriptions (Starter/Pro)
-- Multi-currency support (EUR/USD)
-- Dark/light mode
-- Landing page + blog
-- **Security hardening:** RLS on all tables, Redis rate limiting, webhook idempotency, input sanitization, CSRF protection, admin auth
-- **Sentry monitoring:** ✅ PRODUCTION-READY - Full error tracking (client, server, edge), tunnel route configured, global error boundary, Session Replay enabled
-
-### 🔴 CRITICAL - Blocking Launch
-
-| Feature | Status |
-|---------|--------|
-| **Cron scheduler** | ✅ DONE (Feb 15, 2026) - 6 jobs running on cron-job.org with optimal frequencies |
-| **Dispute/refund UI** | ✅ DONE (Feb 13, 2026) - Modal with active disputes, evidence deadlines, past disputes summary |
-
-### 🟡 High Priority (Post-Launch Week 1)
-
-| Feature | Status |
-|---------|--------|
-| **Test end-to-end payment flow** | Need real Stripe Connect account test |
-| **Email deliverability tracking** | Resend webhooks for bounces/complaints |
-| **Admin dashboard** | Webhook logs, system health, user management |
-| **Stripe Connect edge cases** | Account restricted, payout failures, re-verification |
-
-### 🟢 Medium Priority
-
-| Feature | Status |
-|---------|--------|
-| SMS implementation (Twilio) | 40% complete - backend ready, need Twilio setup |
-| Timezone support | Planned |
-| White-label emails (Pro) | Planned |
-| Business plan tier | Schema ready, UI not exposed |
-
-### Launch Readiness: ~98% Complete
-
-**Recent Updates (Feb 15, 2026):**
-- ✅ Cron jobs migrated to cron-job.org with optimal frequencies (17x improvement)
-- ✅ Draft window logic fixed (10-minute grace period before auto-send)
-- ✅ All 6 cron jobs tested and operational
-- ✅ Email notifications configured for cron failures
-- ✅ Database migrations completed (reminder_sent_at, usage_warning_sent_at, booking_confirmations columns)
-
-**Previous Updates (Feb 13, 2026):**
-- ✅ Sentry monitoring fully implemented and tested (client + server + edge)
-- ✅ Dispute/refund UI completed in dashboard
-- ✅ Opengraph images fixed (display flex errors resolved)
-
-**Ready to launch** after:
-1. ✅ Database migrations deployed (DONE - Feb 15, 2026)
-2. ✅ Set up cron scheduler (DONE - Feb 15, 2026) - cron-job.org configured
-3. ✅ Configure Sentry monitoring (DONE - Feb 13, 2026)
-4. ⏳ Test complete payment flow with test connected account
-5. ✅ Add basic dispute/refund UI (DONE - Feb 13, 2026)
-
-**Cron Jobs (Running on cron-job.org):**
-- ✅ send-draft-confirmation - Every 30 min (48x/day) - sends after 10-min draft window
-- ✅ send-reminders - Every hour (24x/day) - Pro users only
-- ✅ sync-calendar - Every hour (24x/day) - keeps events up-to-date
-- ✅ check-expiring-authorizations - Every 6 hours (4x/day) - prevents PaymentIntent expiry
-- ✅ check-usage - Daily at 09:00 UTC (1x/day) - warns Starter users at 25/30
-- ✅ auto-confirm - Daily at 17:00 UTC (1x/day) - disabled in code (legacy)
-
----
-
-## 13. Critical Gotchas
+## 12. Critical Gotchas
 
 ### Payment & Security
 - **Default no-show fee is €20** (2000 cents) — not €30. Use `DEFAULT_NO_SHOW_FEE_CENTS` constant from `lib/noShowRules.ts`
-- **Connected accounts**: PaymentIntents correctly use `on_behalf_of` and `transfer_data` (verified in `/api/stripe/create-authorization`)
-- **Stripe Connect flow**: User → onboarding → pending → enabled (tracked in `OnboardingBanner` component)
-- **Payment authorization**: Only works after `onboarding_completed = true` (enforced in create-authorization route)
-- **Rate limiting**: ALWAYS use Redis-based rate limiting from `@/lib/rateLimit`, NEVER in-memory from `@/lib/validation` (ineffective in serverless)
-- **Admin routes**: MUST use email whitelist authentication (`ADMIN_EMAILS` env var)
+- **Payment authorization**: Only works after `onboarding_completed = true` (enforced in `/api/stripe/create-authorization`)
+- **Confirmation sending**: Only works after `onboarding_completed = true` — enforced at every send path (see Confirmation Flow section). Do NOT add a new send path without this check.
+- **Rate limiting**: ALWAYS use `@/lib/rateLimit` (Redis), NEVER `checkRateLimitInMemory_NOT_FOR_PRODUCTION` from `@/lib/validation`
+- **Admin routes**: MUST use email whitelist authentication (`ADMIN_EMAILS` env var) — compare with `.toLowerCase()` on both sides
 - **Debug/test routes**: MUST return 404 in production to prevent information disclosure
+- **PaymentIntent IDs**: NEVER accept from client — always read from database
+- **`verifyOrigin()`**: Fails closed in production if `NEXT_PUBLIC_APP_URL` is unset — ensure this env var is always set in Vercel
 
-### Calendar Integration Implementation Notes
-- **Microsoft Login**: ✅ WORKING - Users can log in via Supabase Azure provider
-- **Microsoft Calendar**: ✅ WORKING - Full OAuth2 integration with Microsoft Graph API
-- **Google Calendar**: ✅ WORKING - Full OAuth2 integration with Google APIs
-- **✅ CRITICAL - Connect Routes**: NEVER add session verification to `/api/google/connect` or `/api/microsoft/connect`
-  - OAuth state parameter (HMAC-signed) provides CSRF protection
-  - Session verification breaks the OAuth flow (incorrectly added Feb 13, removed same day)
-  - Callback route verifies state signature to ensure legitimate user initiated flow
-- **✅ CRITICAL - Status Routes**: NEVER add session verification OR rate limiting to `/api/google/status` or `/api/microsoft/status`
-  - Protected by: UUID validation + database RLS policies ONLY
-  - **Redis rate limiting removed** (Feb 16) - causes "Redis not configured" warnings and is unnecessary for read-only status checks
-  - Session verification breaks status checks and prevents "Connected" badge from showing
-  - Using `supabaseAdmin` with RLS ensures users can only see their own connections
-- **✅ CRITICAL - Disconnect Routes**: `/api/google/disconnect` and `/api/microsoft/disconnect` REQUIRE authentication
-  - MUST include `Authorization: Bearer <token>` header from Supabase session
-  - MUST include `credentials: 'include'` in fetch options
-  - Frontend MUST check `res.ok` before updating UI state (don't silently ignore errors)
-  - Common bug: Calling disconnect without auth headers → 401 Unauthorized → UI shows disconnected but DB not updated
-  - See `SettingsContent.tsx` disconnect handlers for correct pattern
-- **✅ CRITICAL - Callback Routes**: MUST set `status: 'connected'` when creating/updating connection
-  - Without this, reconnecting a disconnected calendar keeps `status: 'disconnected'` → status check fails
-  - Migration 006 added `status` column with default `'connected'`
-- **✅ CRITICAL - Status Column**: `google_connections` table has `status` column (`'connected'` or `'disconnected'`)
-  - Run migration `006-add-status-column.sql` in Supabase if not already done
-  - Status routes check `if (data.status === 'disconnected')` in code, not query filter (more reliable with NULL values)
-- **✅ CRITICAL - Event Deletion Sync**: Calendar sync routes delete orphaned Attenda bookings
-  - Fetches current Google/Microsoft events, compares with DB bookings in same time range
-  - Deletes bookings for events no longer in calendar (handles cascade deletes)
-  - Without this, deleting events in Google Calendar leaves them in Attenda dashboard
+### Calendar
+- **`/connect` and `/status` routes require session auth** — uses cookie-based auth (browsers send cookies on GET navigation). Added 2026-02-21 to prevent OAuth session fixation and IDOR. SettingsContent.tsx MUST include `Authorization: Bearer` header when calling status routes.
+- **NEVER add session verification to `/callback`** — the user's browser is in the OAuth redirect, no session is available. HMAC state is the protection there.
+- **ALWAYS include auth headers on disconnect calls** — without `Authorization: Bearer <token>`, disconnect returns 401 but UI may still update, leaving DB out of sync
+- **Callback MUST set `status: 'connected'`** — otherwise reconnect silently keeps `'disconnected'` status
+- **Google OAuth is used twice**: Login (via Supabase Auth) AND Calendar integration (direct OAuth2) — separate apps, both must be configured
 - **Query Param Handling**: Settings page useEffects must preserve other query params when clearing their own (e.g., subscription success, upgrade, OAuth callback)
-- **PaymentIntent expiry**: Auth expires after 7 days, must renew for bookings >7 days away
-- **Multi-currency**: Always store currency with amount. Display correct symbol based on user's country.
+- **`draft_expires_at` must always be set** — all routes that create `calendar_bookings` with `status = 'draft'` must set `draft_expires_at = now + 10 min`. Without it, `lte` filter in `send-draft-confirmation` cron silently skips the booking forever.
 
 ### Database
 - **`profiles` table has NO `email` column** — get email from `user` object (via `getAuthenticatedUser()`)
-- **RLS Migration**: `005-enable-rls-policies-SAFE-RERUN.sql` covers all 17 tables (deployed Feb 13, 2026)
 - **`appointment_attendance` and `appointment_no_show_overrides`** use `user_id` directly, NOT `booking_id`. RLS policies must use `auth.uid() = user_id`
-- **`google_connections` status column**: Added in migration 006 (Feb 16, 2026) - tracks `'connected'` or `'disconnected'` state for calendar connections
-- **Migrations deployed:** 001-stripe-connect, 002-webhook-system, 003-refunds-disputes, 004-gdpr-compliance, 005-enable-rls-policies-SAFE-RERUN, 006-add-status-column
+- **`google_connections` status column**: Check `data.status === 'disconnected'` in code, not as a query filter (more reliable with NULL values from pre-migration rows)
 
 ### Development
 - **Timezone dates**: Always use `toLocalDateStr()`, never `toISOString().split("T")[0]`
@@ -838,15 +589,14 @@ Required in `.env.local` (all configured in Vercel):
 - **Build testing**: Always run `npm run build` locally before pushing
 - **Vercel env vars**: Invisible newline characters when pasting cause cryptic errors. Press End then Backspace after pasting.
 - **Next.js 16 `useSearchParams()`**: Must wrap in `<Suspense>` boundary or page will fail static generation
-- **Nested directory structure**: NEVER create directories like `app/attenda/app/` - causes duplicate Next.js installations
-- **node_modules in Git**: NEVER commit `app/attenda/node_modules/` - check `git status` and selectively stage files
+- **Nested directory structure**: NEVER create directories like `app/attenda/app/` — causes duplicate Next.js installations
+- **node_modules in Git**: NEVER commit `app/attenda/node_modules/` — check `git status` and selectively stage files
 
 ### Styling
 - **CSS variables**: `--color-bg` (#0F172A dark) differs from `--color-bg-card` (#1E293B dark) — always use `--color-bg-card` for card backgrounds
 - **Dark mode**: via `[data-theme="dark"]` selector. Always check dark mode contrast for colored badges.
 - **`<button>` elements**: Must explicitly set `background` and `border` when using as card
 - **Sidebar dark mode nav links**: Need explicit `[data-theme="dark"] .sidebar-nav-link` color (#cbd5e1)
-- **Sidebar logo**: Must have gradient background matching landing page header logo (32px × 32px)
 - **Settings card spacing**: Consistent padding (18px card, 10px row, 14px gap), font sizes (0.875rem labels, 1rem titles)
 
 ### UI/UX
@@ -858,6 +608,5 @@ Required in `.env.local` (all configured in Vercel):
 - **SocialProof section removed** from landing page — Hero floating metrics are separate
 
 ### Integrations
-- **Google token refresh**: Tokens expire every hour, refresh tokens expire after 6 months inactive. Must handle both.
-- **Google OAuth used twice**: Login (via Supabase Auth) + Calendar (direct OAuth2)
-- **Disputes**: Business has limited time to respond with evidence. Track `evidence_due_by` dates.
+- **Google token refresh**: Tokens expire every hour; refresh tokens expire after 6 months inactive. Must handle both.
+- **Disputes**: Track `evidence_due_by` dates — business has limited time to submit evidence.
