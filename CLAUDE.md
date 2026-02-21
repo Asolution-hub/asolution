@@ -370,7 +370,7 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 
 ### Security Architecture
 
-**Row Level Security (RLS):** All tables protected with user-scoped RLS policies using `auth.uid()`. Migration `005-enable-rls-policies-SAFE-RERUN.sql` covers 17 tables; migration `007-booking-protections-rls.sql` covers `booking_protections` (added 2026-02-21).
+**Row Level Security (RLS):** All tables protected with user-scoped RLS policies using `auth.uid()`. Migration `005-enable-rls-policies-SAFE-RERUN.sql` covers 17 tables; migration `007-booking-protections-rls.sql` covers `booking_protections` (added 2026-02-21). **All 18 tables now have RLS.**
 
 **API Route Protection:**
 - **Admin Routes**: Email whitelist authentication required (`/api/admin/reconcile`, `/api/admin/webhooks`)
@@ -398,7 +398,7 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 
 **Input Sanitization:** `sanitizeString()` for all user-controlled text (business names, display names, settings). `sanitizeForSMS()` for SMS (removes Unicode direction overrides, zero-width chars).
 
-**Headers & CSP:** Strict CSP (no unsafe-eval). HSTS enabled. X-Frame-Options: DENY. Applied via `proxy.ts` (Next.js 16 middleware file — do NOT create `middleware.ts`). TODO: Replace 'unsafe-inline' with nonces.
+**Headers & CSP:** Strict CSP (no unsafe-eval). HSTS enabled. X-Frame-Options: DENY. Applied via `proxy.ts` (Next.js 16 middleware file — do NOT create `middleware.ts`). `'unsafe-inline'` is present for script-src and style-src — replacing with nonces is a known future improvement (complex due to Next.js hydration + Stripe inline scripts).
 
 ### Security Rules
 - Never trust client input — all inputs sanitized
@@ -418,9 +418,18 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 - **Starter**: "via Attenda" footer, Attenda branding
 - **Pro**: Optional white-label (business name, business logo, remove Attenda branding)
 
-**Implemented Templates:** Booking Confirmation, Booking Reminder (Pro only), No-Show Receipt, Refund Issued, Welcome Starter, Welcome Pro, Usage Warning (25/30)
+**Implemented Templates (all complete as of 2026-02-21):**
+- Booking Confirmation, Booking Reminder (Pro only), No-Show Receipt, Refund Issued
+- Welcome Starter, Welcome Pro, Usage Warning (25/30)
+- Account Verified (sent on Stripe Connect verification)
+- Account Restricted (sent when Stripe needs more info)
+- Reauthorization Required (sent to client when PaymentIntent expires after 7 days)
+- Calendar Disconnected (sent on `invalid_grant` / token revocation)
+- Payment Failed (sent to business after 3 failed card auth attempts)
 
-**Planned Templates:** Account Verified, Account Restricted, Dispute Created, Calendar Disconnected, Reauthorization Required, Payment Failed
+**Email design system:** Indigo brand (#6366f1) for all info/CTA cards. Semantic red for NoShowReceipt, semantic green for RefundIssued, amber for AccountRestricted reason card and PaymentFailed warning card.
+
+**Still planned:** Dispute Created (notify business of new chargeback)
 
 ### Calendar Integrations
 
@@ -439,7 +448,7 @@ Both providers use the unified `google_connections` table (with `provider` colum
 | `/callback` | ❌ No | ❌ No | Verifies OAuth state HMAC signature |
 | `/disconnect` | ✅ Yes | Yes | `Authorization: Bearer <token>` header |
 
-**`/connect` and `/status` require session verification** (added 2026-02-21 security audit). `/callback` does NOT — it uses HMAC state and has no session available. Browsers send auth cookies on GET navigation, so `/connect` session check works without Authorization header. **Never add session verification to `/callback`** — the user has no session at that point.
+**`/connect` and `/status` require session verification** (added 2026-02-21 security audit — second audit fixes also applied same date). `/callback` does NOT — it uses HMAC state and has no session available. Browsers send auth cookies on GET navigation, so `/connect` session check works without Authorization header. **Never add session verification to `/callback`** — the user has no session at that point.
 
 **Disconnect/Reconnect Flow:**
 1. Disconnect: API sets `status = 'disconnected'` in `google_connections`
@@ -579,6 +588,7 @@ Required in `.env.local` (all configured in Vercel):
 - **`draft_expires_at` must always be set** — all routes that create `calendar_bookings` with `status = 'draft'` must set `draft_expires_at = now + 10 min`. Without it, `lte` filter in `send-draft-confirmation` cron silently skips the booking forever.
 
 ### Database
+- **`booking_confirmations.currency`** is the source of truth for the currency used in a booking — fetched in `confirmation-status` API and passed through `currencyMap` in dashboard page → `EventCard` → `RefundModal`. Do NOT hardcode `"eur"`.
 - **`profiles` table has NO `email` column** — get email from `user` object (via `getAuthenticatedUser()`)
 - **`appointment_attendance` and `appointment_no_show_overrides`** use `user_id` directly, NOT `booking_id`. RLS policies must use `auth.uid() = user_id`
 - **`google_connections` status column**: Check `data.status === 'disconnected'` in code, not as a query filter (more reliable with NULL values from pre-migration rows)
