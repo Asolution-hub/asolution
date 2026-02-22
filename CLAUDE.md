@@ -591,7 +591,7 @@ Required in `.env.local` (all configured in Vercel):
 - **`draft_expires_at` must always be set** — all routes that create `calendar_bookings` with `status = 'draft'` must set `draft_expires_at = now + 10 min`. Without it, `lte` filter in `send-draft-confirmation` cron silently skips the booking forever.
 
 ### Database
-- **`booking_confirmations.currency`** is the source of truth for the currency used in a booking — fetched in `confirmation-status` API and passed through `currencyMap` in dashboard page → `EventCard` → `RefundModal`. Do NOT hardcode `"eur"`.
+- **`booking_confirmations.currency`** is the source of truth for the currency used in a booking — used in: `confirmation-status` API → `currencyMap` → `EventCard` → `RefundModal`; `confirm/[token]` page + `ConfirmationFlow`; `attendance/mark` no-show receipt email; `bookings/[id]/refund` refund email. Do NOT hardcode `"eur"` or `"€"` anywhere — always derive symbol with `currency.toUpperCase() === "USD" ? "$" : "€"`.
 - **`profiles` table has NO `email` column** — get email from `user` object (via `getAuthenticatedUser()`)
 - **`appointment_attendance` and `appointment_no_show_overrides`** use `user_id` directly, NOT `booking_id`. RLS policies must use `auth.uid() = user_id`
 - **`google_connections` status column**: Check `data.status === 'disconnected'` in code, not as a query filter (more reliable with NULL values from pre-migration rows)
