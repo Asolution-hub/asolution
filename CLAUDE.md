@@ -418,18 +418,21 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 - **Starter**: "via Attenda" footer, Attenda branding
 - **Pro**: Optional white-label (business name, business logo, remove Attenda branding)
 
-**Implemented Templates (all complete as of 2026-02-21):**
+**All templates implemented and wired (complete as of 2026-02-22):**
 - Booking Confirmation, Booking Reminder (Pro only), No-Show Receipt, Refund Issued
 - Welcome Starter, Welcome Pro, Usage Warning (25/30)
-- Account Verified (sent on Stripe Connect verification)
-- Account Restricted (sent when Stripe needs more info)
+- Account Verified (sent via Stripe `account.updated` webhook)
+- Account Restricted (sent via Stripe `account.updated` webhook)
 - Reauthorization Required (sent to client when PaymentIntent expires after 7 days)
 - Calendar Disconnected (sent on `invalid_grant` / token revocation)
 - Payment Failed (sent to business after 3 failed card auth attempts)
+- Dispute Created (sent to business via `charge.dispute.created` webhook)
+
+**Refund Issued wiring:** Called in `/api/bookings/[id]/refund` after Stripe refund succeeds. Retrieves card details via `stripe.paymentIntents.retrieve` with `expand: ["payment_method"]`.
+
+**Account Verified/Restricted wiring:** Handled via Stripe `account.updated` webhook (async verification path), NOT in `/api/stripe/connect/return` — the stale TODO comment there is intentional, the webhook is the correct path.
 
 **Email design system:** Indigo brand (#6366f1) for all info/CTA cards. Semantic red for NoShowReceipt, semantic green for RefundIssued, amber for AccountRestricted reason card and PaymentFailed warning card.
-
-**Still planned:** Dispute Created (notify business of new chargeback)
 
 ### Calendar Integrations
 
