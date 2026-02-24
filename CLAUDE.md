@@ -283,6 +283,8 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `au
 **Email:** `RESEND_API_KEY`, `EMAIL_FROM`
 **SMS (planned):** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `SMS_PROVIDER`
 **Security:** `CRON_SECRET`, `OAUTH_STATE_SECRET`, `INTERNAL_API_SECRET`, `TOKEN_ENCRYPTION_KEY` (64 hex chars), `ADMIN_EMAILS`
+- All security secrets must be **unique, high-entropy values** — never reuse the same value across variables (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
+- When rotating `CRON_SECRET`: also update the `Authorization: Bearer` header in all 5 jobs on cron-job.org
 **App:** `NEXT_PUBLIC_APP_URL` (`https://attenda.app`)
 **Stripe:** `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID_EUR`, `STRIPE_PRO_PRICE_ID_USD`
 **Redis:** `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
