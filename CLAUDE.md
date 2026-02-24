@@ -171,6 +171,14 @@ Refunds tracked in `stripe_refunds`, client notified. Disputes tracked in `strip
 ### Rate Limiting — ALWAYS use `@/lib/rateLimit` (Redis), NEVER in-memory
 Confirmation: 10/min | Stripe: 20/min | Refund: 5/min | General: 60/min | Auth: 5/min | Webhooks: 100/min
 
+**Fail-closed behavior (STRICT_LIMITERS: `confirmation`, `auth`, `stripe`, `refund`):**
+- Redis env vars **absent** → fail **open** with `console.warn` — Redis hasn't been set up yet, not a crash
+- Redis env vars **present** but connection fails → fail **closed** — Redis crashed mid-operation (security risk)
+
+This distinction matters: if `UPSTASH_REDIS_REST_URL`/`TOKEN` are not set, ALL rate limiting is disabled but the app still works. If Redis goes down after being configured, strict endpoints block to prevent enumeration/spam during the outage.
+
+**⚠️ Redis not yet configured in Vercel.** `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are missing — rate limiting is currently disabled in production. Set up [Upstash Redis](https://upstash.com) (free tier) and add both vars.
+
 ### Token & Payment Security
 - OAuth tokens: AES-256-GCM mandatory (`lib/encryption.ts`)
 - PaymentIntent IDs: NEVER accept from client — always read from DB
@@ -286,8 +294,8 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `au
 - All security secrets must be **unique, high-entropy values** — never reuse the same value across variables (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
 - When rotating `CRON_SECRET`: also update the `Authorization: Bearer` header in all 5 jobs on cron-job.org
 **App:** `NEXT_PUBLIC_APP_URL` (`https://attenda.app`)
-**Stripe:** `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID_EUR`, `STRIPE_PRO_PRICE_ID_USD`
-**Redis:** `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN`
+**Stripe:** `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID` (single price ID used by both `create-checkout` and `create-checkout-guest`)
+**Redis:** `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (**not yet set in Vercel** — rate limiting is disabled until added)
 **Sentry:** `SENTRY_AUTH_TOKEN`
 
 **Required Stripe webhook events:**
@@ -339,6 +347,8 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `au
 - **No-show fee default:** €20 (2000 cents) — use `DEFAULT_NO_SHOW_FEE_CENTS`, never hardcode
 - **PaymentIntent IDs:** never from client — always read from DB
 - **`verifyOrigin()`** fails closed if `NEXT_PUBLIC_APP_URL` unset — always set in Vercel
+- **Checkout API calls:** always check `res.ok && data.url` before redirecting — a 429/500 returns JSON without a `url` field and must not silently fall through
+- **Rate limiter + Redis:** if Redis env vars are absent, `checkRateLimit()` always returns `{ success: true }` — the app works but has no rate limiting. Do NOT add Redis env vars without testing first, as that activates fail-closed behavior for strict limiters.
 
 ### Calendar
 - **`/callback`:** NEVER add session verification — HMAC state is the only protection; user has no session during OAuth redirect
