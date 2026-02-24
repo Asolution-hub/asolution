@@ -73,7 +73,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## 3. Tech Stack & Commands
 
-**Framework**: Next.js 16, React 19, TypeScript, Tailwind CSS 4
+**Framework**: Next.js 16.1.6, React 19, TypeScript, Tailwind CSS 4
 **Database/Auth**: Supabase (PostgreSQL + RLS + magic links + Google/Microsoft OAuth)
 **Payments**: Stripe Connect + Subscriptions
 **Monitoring**: Sentry (error tracking, performance monitoring, Session Replay)
@@ -415,10 +415,14 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 ### Email System (Resend)
 
 **Email Branding:**
-- **Starter**: "via Attenda" footer, Attenda branding
-- **Pro**: Optional white-label (business name, business logo, remove Attenda branding)
+- **Starter**: Full Attenda branding in header + footer
+- **Pro**: Optional white-label — when `white_label_enabled = true` in profiles, client-facing emails show business name/logo in header and "Powered by Attenda" footer instead
 
-**All templates implemented and wired (complete as of 2026-02-22):**
+**White-label implementation:** `emails/components/Layout.tsx` accepts optional `branding?: { name: string; logoUrl?: string | null }` prop. When set, header renders business name (or `<Img>` if `logoUrl` provided) and footer shows small "Powered by Attenda". Call sites derive it as: `const whiteLabel = profile?.white_label_enabled && profile?.business_name ? { businessName: profile.business_name, logoUrl: profile.business_logo_url } : undefined` and pass to the sender function. Applied to 5 client-facing templates only (see below).
+
+**Business-owner templates** (always Attenda branding — no white-label): WelcomeStarter, WelcomePro, UsageWarning, AccountVerified, AccountRestricted, DisputeCreated, PaymentFailed, CalendarDisconnected.
+
+**All templates implemented and wired (complete as of 2026-02-24):**
 - Booking Confirmation, Booking Reminder (Pro only), No-Show Receipt, Refund Issued
 - Welcome Starter, Welcome Pro, Usage Warning (25/30)
 - Account Verified (sent via Stripe `account.updated` webhook)
@@ -427,6 +431,8 @@ Buttons must enable/disable based on time, plan, status, and onboarding. Never a
 - Calendar Disconnected (sent on `invalid_grant` / token revocation)
 - Payment Failed (sent to business after 3 failed card auth attempts)
 - Dispute Created (sent to business via `charge.dispute.created` webhook)
+
+**White-label wired in** (client-facing templates): `BookingConfirmation`, `BookingReminder`, `NoShowReceipt`, `RefundIssued`, `ReauthorizationRequired`. Call sites: `notifications/send`, `cron/send-reminders`, `attendance/mark`, `bookings/[id]/refund`, `cron/check-expiring-authorizations`. Each must select `white_label_enabled, business_logo_url` from profiles and derive `whiteLabel`.
 
 **Refund Issued wiring:** Called in `/api/bookings/[id]/refund` after Stripe refund succeeds. Retrieves card details via `stripe.paymentIntents.retrieve` with `expand: ["payment_method"]`.
 
@@ -609,11 +615,12 @@ Required in `.env.local` (all configured in Vercel):
 - **CSS variables**: `--color-bg` (#0F172A dark) differs from `--color-bg-card` (#1E293B dark) — always use `--color-bg-card` for card backgrounds
 - **Dark mode**: via `[data-theme="dark"]` selector. Always check dark mode contrast for colored badges.
 - **`<button>` elements**: Must explicitly set `background` and `border` when using as card
-- **Sidebar dark mode nav links**: Need explicit `[data-theme="dark"] .sidebar-nav-link` color (#cbd5e1)
+- **Sidebar CSS**: Old base classes (`.sidebar-logo`, `.sidebar-nav`, `.sidebar-nav-link`, `.sidebar-bottom`, etc.) were deleted in 2026-02-24 cleanup — use the `*-refined` variants only (`.sidebar-logo-refined`, `.sidebar-nav-refined`, `.sidebar-nav-item`)
 - **Settings card spacing**: Consistent padding (18px card, 10px row, 14px gap), font sizes (0.875rem labels, 1rem titles)
 
 ### UI/UX
 - **DashboardHeader**: Only renders on mobile (<900px) using client-side mount check (prevents flash bug)
+- **Loading screen**: `app/auth/callback/page.tsx` uses `settings-loading` (full-screen dark) — NOT `login-page > login-card`. Using the wrong container caused a visual flash during login → dashboard transition.
 - **Skeleton loading states** used in dashboard (not spinner)
 - **Calendar day highlight resets** when CreateEventModal closes
 - **Scroll-to-top button** appears after 600px scroll
