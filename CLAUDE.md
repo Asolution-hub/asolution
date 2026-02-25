@@ -166,7 +166,7 @@ Refunds tracked in `stripe_refunds`, client notified. Disputes tracked in `strip
 - **UUID validation:** `isValidUUID()` on all route params
 - **Debug/test routes:** Return 404 in production (`/api/debug-auth`, `/api/sentry-test-error`)
 - **Health endpoint:** Detailed metrics restricted to admin users only
-- **RLS:** All 18 tables protected with `auth.uid()` policies (migrations 005 + 007)
+- **RLS:** All 23 tables have RLS enabled (migrations 005 + 007 + 008). All policies use `(select auth.uid())` wrapper for performance (migration 009) — never write `auth.uid()` bare in a policy.
 
 ### Rate Limiting — ALWAYS use `@/lib/rateLimit` (Redis), NEVER in-memory
 Confirmation: 10/min | Stripe: 20/min | Refund: 5/min | General: 60/min | Auth: 5/min | Webhooks: 100/min
@@ -254,6 +254,7 @@ Google tokens expire hourly; refresh tokens expire after 6 months inactive. Hand
 |-------|---------|
 | `profiles` | User accounts, plan, Stripe IDs, business info, calendar prefs |
 | `google_connections` | Encrypted OAuth tokens, expiry, status (`connected`/`disconnected`) |
+| `google_tokens` | **Legacy/orphaned** — predecessor to `google_connections`, no code references it. RLS enabled, deny-all. Do not use. |
 | `calendar_bookings` | Synced events, currency |
 | `booking_confirmations` | Tokens, status, PaymentIntent, card auth, currency |
 | `no_show_settings` | Global protection rules per user |
@@ -265,7 +266,7 @@ Google tokens expire hourly; refresh tokens expire after 6 months inactive. Hand
 | `stripe_webhook_events` | Idempotency log |
 | `payment_authorization_failures` | Failed auth attempts |
 
-RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `auth.uid() = user_id`.
+RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `(select auth.uid()) = user_id`.
 
 ### Notable `profiles` Columns
 `stripe_customer_id`, `stripe_subscription_id`, `subscription_status`, `stripe_account_id`, `stripe_account_status`, `onboarding_completed`, `business_name`, `business_address`, `business_country`, `business_vat`, `white_label_enabled`, `business_logo_url`, `week_start_day`, `time_format`, `timezone`, `currency`, `deleted_at`
@@ -282,6 +283,8 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `au
 - `005` — RLS on 17 tables
 - `006` — `google_connections.status` column
 - `007` — RLS on `booking_protections`
+- `008` — Security: RLS on `google_tokens` (legacy orphaned table); `SET search_path = ''` on all 7 DB functions
+- `009` — Performance: all RLS policies updated to `(select auth.uid())`; 5 missing FK indexes added; duplicate `idx_profiles_stripe_account` index dropped
 
 ### Environment Variables
 
@@ -359,6 +362,8 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `au
 ### Database
 - **`booking_confirmations.currency`** is source of truth — never hardcode `"eur"`/`"€"`
 - **`appointment_attendance` / `appointment_no_show_overrides`** use `user_id`, not `booking_id`
+- **RLS policies:** always use `(select auth.uid())` not bare `auth.uid()` — the wrapper makes Postgres evaluate it once (initplan) instead of per-row
+- **DB functions:** always add `SET search_path = ''` and schema-qualify all table refs (`public.tablename`) to prevent search_path injection
 
 ### Development
 - **Dates:** `toLocalDateStr()`, never `toISOString().split("T")[0]`
