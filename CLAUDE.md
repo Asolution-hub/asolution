@@ -27,7 +27,11 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## 2. Payment Architecture (NON-NEGOTIABLE)
 
-**Money flow:** Business registers Stripe Connect → Client authorizes card (PaymentIntent on connected account) → No-show → Business marks no-show → fee captured directly to business bank. Attenda takes platform fee. Attenda CANNOT hold business revenue.
+**Money flow:** Business registers Stripe Connect → Client authorizes card (PaymentIntent **directly on connected account**) → No-show → Business marks no-show → fee captured directly to business bank. Attenda takes **zero platform fee** on no-show transactions. Attenda revenue = Pro subscription only.
+
+**Stripe charge type:** No-show PaymentIntents use **direct charges** (`{ stripeAccount: connectedAccountId }` on all Stripe API calls). They are invisible to Attenda's Stripe dashboard. Disputes are handled entirely between the business and their customer. Do NOT add `on_behalf_of`, `transfer_data`, or `application_fee_amount` to no-show PaymentIntents.
+
+**Legacy transition:** PIs created before the direct charge switch (2026-02-26) are destination charges on the platform account. `capturePayment`, `voidAuthorization`, `getPaymentIntent`, `retrievePaymentIntentExpanded`, and `createRefund` in `lib/stripe.ts` all try the connected account first, then fall back to the platform account if Stripe returns 404 (`isStripeResourceMissing` helper). Do not remove this fallback.
 
 **Charging prerequisites — ALL must be true:**
 1. `onboarding_completed = true` (Stripe Connect verified)
@@ -80,7 +84,7 @@ App/attenda/
 
 ### Cron Jobs (cron-job.org)
 
-All 5 live. POST only, `Authorization: Bearer <CRON_SECRET>` required.
+All 6 live. POST only, `Authorization: Bearer <CRON_SECRET>` required.
 
 | Job | Schedule | Purpose |
 |-----|----------|---------|
@@ -89,6 +93,7 @@ All 5 live. POST only, `Authorization: Bearer <CRON_SECRET>` required.
 | `sync-calendar` | Every hour | Sync Google/Microsoft; also on dashboard load |
 | `check-expiring-authorizations` | Every 6 hours | Renew PaymentIntents expiring within 24h |
 | `check-usage` | Daily 09:00 UTC | Warn Starter at 25/30 appointments; once/month |
+| `check-unresolved-attendance` | Every hour | Reminder to business at event_end+2h; auto-resolve as attended at event_end+24h |
 
 ---
 
@@ -141,6 +146,37 @@ Do NOT add a new send path without this check. UI disables send buttons for non-
 
 **`draft_expires_at` must always be set** when creating `calendar_bookings` with `status = 'draft'`. Without it, the `lte` filter in `send-draft-confirmation` cron silently skips the booking forever.
 
+### Datetime Snapshot (`display_datetime`)
+
+**Problem solved:** Server-side `new Date(event_start).toLocaleTimeString()` runs in UTC (Vercel servers). A 14:00 local event shows as 12:00 in emails for UTC+2 users.
+
+**Solution:** Pre-formatted string `"Saturday, 1 March 2026 at 14:00"` stored at booking creation/sync time in `calendar_bookings.display_datetime`, then copied into `booking_confirmations.display_datetime` at confirmation send time.
+
+**`lib/formatDatetime.ts`** — three helpers:
+- `formatDisplayDatetime(localDatetimeStr, timeFormat)` — for Google events (has `+HH:MM` offset, treat local parts directly via `Date.UTC` trick to avoid TZ interference)
+- `formatDisplayDatetimeFromUtc(utcStr, timeFormat, timezone)` — for Microsoft/manual events (UTC string, appends Z if missing, converts via user's IANA timezone)
+- `computeDisplayDatetime(start, timeFormat, timezone)` — dispatcher: returns null for all-day; detects offset presence to pick the right formatter
+
+**Consumption pattern** (all client-facing datetime displays):
+```ts
+const hasSnapshot = display_datetime?.includes(" at ");
+const eventDate = hasSnapshot ? display_datetime!.split(" at ")[0] : new Date(event_start).toLocaleDateString(...);
+const eventTime = hasSnapshot ? display_datetime!.split(" at ")[1] : `${new Date(event_start).toLocaleTimeString(...)} - ...`;
+```
+
+**All locations that consume `display_datetime`:**
+- `confirm/[token]/page.tsx` — server component, reads from `booking_confirmations`
+- `api/notifications/send` — BookingConfirmation email
+- `api/cron/send-reminders` — BookingReminder email
+- `api/cron/send-draft-confirmation` — advance notice email
+- `api/cron/check-expiring-authorizations` — ReauthorizationRequired email
+- `api/attendance/mark` — NoShowReceipt email
+- `api/bookings/[id]/refund` — RefundIssued email
+
+**Resend carry-forward:** `resend-confirmation` copies `display_datetime` (and other snapshot fields) from the previous confirmation row to the new one — never re-derives it.
+
+**Pre-migration fallback:** All locations check `?.includes(" at ")` before using the snapshot. Null/missing → fall back to live `new Date()` formatting (still UTC-wrong for old bookings, but unavoidable).
+
 ### Stripe Authorization
 PaymentIntent on business's connected account. Auth only, no capture. Card/Apple Pay/Google Pay. Business notified after 3 failed attempts. PIs expire after 7 days — cron auto-renews and notifies client to re-authorize.
 
@@ -149,6 +185,25 @@ Before event start: no attendance actions. After start: "Mark attended" → rele
 
 ### Refunds & Disputes
 Refunds tracked in `stripe_refunds`, client notified. Disputes tracked in `stripe_disputes`, business notified immediately. Track `evidence_due_by` — limited response window.
+
+### Attendance Reminder & Auto-Resolve
+
+**Problem:** Businesses sometimes forget to mark attendance after an appointment ends, leaving PaymentIntent authorizations open indefinitely.
+
+**Solution (cron: `check-unresolved-attendance`, every hour):** Two passes over confirmed+card_authorized bookings not yet in `appointment_attendance`:
+
+1. **Reminder pass** (event_end + 2h): Sends one batch email (`AttendanceReminder`) per business listing all unresolved appointments. Sets `booking_confirmations.attendance_reminder_sent_at` to prevent re-send across cron runs.
+2. **Auto-resolve pass** (event_end + 24h): Marks attendance as `attended` with `auto_resolved = true`, calls `voidAuthorization()` (graceful if PI already expired). No charge is ever made during auto-resolve.
+
+**Scope:** Confirmed bookings only (pending/draft ignored). All plans.
+
+**Settings toggle:** `profiles.attendance_reminder_enabled` (default `true`). Toggled in Settings → Notification Preferences → "Mark Attendance Reminders". When `false`, cron skips both passes for that user.
+
+**Email:** `emails/AttendanceReminder.tsx` — business-facing batch digest, always Attenda branding (no white-label). Sent via `sendAttendanceReminderEmail()` in `lib/email.ts`.
+
+**Dashboard display:** Auto-resolved events show an "Auto-resolved" badge (same green as "Attended"). `autoResolvedMap` in `dashboard/page.tsx` and `autoResolved` prop on `EventCard` carry this flag. `appointment_attendance.auto_resolved` is the DB source of truth.
+
+**Important:** Auto-resolve only marks attended + voids auth. It never captures a fee. The 24h timer resets from `event_end`, not `event_start`.
 
 ---
 
@@ -177,7 +232,7 @@ Confirmation: 10/min | Stripe: 20/min | Refund: 5/min | General: 60/min | Auth: 
 
 This distinction matters: if `UPSTASH_REDIS_REST_URL`/`TOKEN` are not set, ALL rate limiting is disabled but the app still works. If Redis goes down after being configured, strict endpoints block to prevent enumeration/spam during the outage.
 
-**⚠️ Redis not yet configured in Vercel.** `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are missing — rate limiting is currently disabled in production. Set up [Upstash Redis](https://upstash.com) (free tier) and add both vars.
+**Redis is configured and active in Vercel.** `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN` are set — rate limiting is enabled in production. Strict limiters (`confirmation`, `auth`, `stripe`, `refund`) fail closed if Redis becomes unreachable.
 
 ### Token & Payment Security
 - OAuth tokens: AES-256-GCM mandatory (`lib/encryption.ts`)
@@ -193,11 +248,12 @@ This distinction matters: if `UPSTASH_REDIS_REST_URL`/`TOKEN` are not set, ALL r
 
 | Route | Session required | Protection |
 |-------|-----------------|-----------|
-| `/connect` | ✅ Yes (cookie-based) | Session check + HMAC-signed state |
+| `/connect` | ✅ Yes (Bearer token) | POST + `Authorization: Bearer` + HMAC-signed state returned as `{ url }` |
 | `/status` | ✅ Yes | Session check + UUID validation; call with `Authorization: Bearer` header |
 | `/callback` | ❌ No | HMAC state only — **NEVER add session check here**, user has no session during OAuth redirect |
 | `/disconnect` | ✅ Yes | `Authorization: Bearer <token>` required |
 
+- **`/connect` is POST, not GET** — vanilla Supabase JS stores sessions in localStorage, not cookies, so GET-navigation cannot carry auth. Frontend fetches `POST /api/google/connect` with Bearer token, gets back `{ url }`, then navigates to it.
 - Callback MUST set `status = 'connected'` — otherwise reconnect silently keeps `'disconnected'` status
 - Frontend disconnect: include `Authorization: Bearer`, `credentials: 'include'`, check `res.ok` before updating UI
 - Status check: compare `data.status === 'disconnected'` in code, not as a query filter (handles NULL from pre-migration rows)
@@ -285,6 +341,10 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `(s
 - `007` — RLS on `booking_protections`
 - `008` — Security: RLS on `google_tokens` (legacy orphaned table); `SET search_path = ''` on all 7 DB functions
 - `009` — Performance: all RLS policies updated to `(select auth.uid())`; 5 missing FK indexes added; duplicate `idx_profiles_stripe_account` index dropped
+- `010` — Policy snapshot fields on `booking_confirmations` (`no_show_fee_cents`, `grace_period_minutes`, `late_cancel_hours`) — locked at send time, null for pre-migration rows
+- `011` — `display_datetime` column on `calendar_bookings` (computed at sync/creation)
+- `012` — `display_datetime` column propagated to `booking_confirmations` (copied at confirmation send + resend)
+- `013` — Attendance reminder: `booking_confirmations.attendance_reminder_sent_at` (dedup), `profiles.attendance_reminder_enabled` (toggle, default true), `appointment_attendance.auto_resolved` (flag)
 
 ### Environment Variables
 
@@ -295,10 +355,10 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `(s
 **SMS (planned):** `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_PHONE_NUMBER`, `SMS_PROVIDER`
 **Security:** `CRON_SECRET`, `OAUTH_STATE_SECRET`, `INTERNAL_API_SECRET`, `TOKEN_ENCRYPTION_KEY` (64 hex chars), `ADMIN_EMAILS`
 - All security secrets must be **unique, high-entropy values** — never reuse the same value across variables (`node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`)
-- When rotating `CRON_SECRET`: also update the `Authorization: Bearer` header in all 5 jobs on cron-job.org
+- When rotating `CRON_SECRET`: also update the `Authorization: Bearer` header in all 6 jobs on cron-job.org
 **App:** `NEXT_PUBLIC_APP_URL` (`https://attenda.app`)
 **Stripe:** `STRIPE_SECRET_KEY`, `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID` (single price ID used by both `create-checkout` and `create-checkout-guest`)
-**Redis:** `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (**not yet set in Vercel** — rate limiting is disabled until added)
+**Redis:** `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (configured in Vercel — rate limiting active)
 **Sentry:** `SENTRY_AUTH_TOKEN`
 
 **Required Stripe webhook events:**
@@ -361,6 +421,7 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `(s
 
 ### Database
 - **`booking_confirmations.currency`** is source of truth — never hardcode `"eur"`/`"€"`
+- **`display_datetime` is source of truth for client-facing datetime display** — never call `new Date(event_start).toLocaleTimeString()` in server routes/components (runs UTC). Use the snapshot; fall back to live formatting only for pre-migration rows. See "Datetime Snapshot" in §5.
 - **`appointment_attendance` / `appointment_no_show_overrides`** use `user_id`, not `booking_id`
 - **RLS policies:** always use `(select auth.uid())` not bare `auth.uid()` — the wrapper makes Postgres evaluate it once (initplan) instead of per-row
 - **DB functions:** always add `SET search_path = ''` and schema-qualify all table refs (`public.tablename`) to prevent search_path injection
