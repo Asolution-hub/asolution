@@ -108,7 +108,9 @@ All 6 live. POST only, `Authorization: Bearer <CRON_SECRET>` required.
 | White-label email | No | Yes (opt-in) |
 | Stripe Express Dashboard | Yes (verified only) | Yes (verified only) |
 
-**Pricing rules:** EU → EUR, rest → USD. Numeric price stays 39. Currency stored per booking. Derive symbol: `currency.toUpperCase() === "USD" ? "$" : "€"` — never hardcode `"eur"` or `"€"`.
+**Pricing rules:** EU → EUR, rest → USD. Numeric price stays 39. Currency stored per booking and on `profiles.currency`. Derive symbol: `currency.toUpperCase() === "USD" ? "$" : "€"` — never hardcode `"eur"` or `"€"`.
+
+**Currency flow:** `profiles.currency` → written to `calendar_bookings.currency` at sync/creation time (google/events, microsoft/events, events/create) → written to `booking_confirmations.currency` at send time → used for Stripe PaymentIntent currency. Editable in Settings → Account & Business. Changing it affects new bookings only; existing confirmed bookings keep their locked currency.
 
 **Starter limit UI:** "Protection not applied — monthly limit reached"
 
@@ -293,7 +295,7 @@ const whiteLabel = profile?.white_label_enabled && profile?.business_name
 ```
 
 **Client-facing (white-label supported):** `BookingConfirmation`, `BookingReminder`, `NoShowReceipt`, `RefundIssued`, `ReauthorizationRequired`
-**Business-owner (always Attenda branding):** `WelcomeStarter`, `WelcomePro`, `UsageWarning`, `AccountVerified`, `AccountRestricted`, `DisputeCreated`, `PaymentFailed`, `CalendarDisconnected`
+**Business-owner (always Attenda branding):** `WelcomeStarter`, `WelcomePro`, `UsageWarning`, `AccountVerified`, `AccountRestricted`, `DisputeCreated`, `DisputeResolved`, `PaymentFailed`, `CalendarDisconnected`
 
 **Call sites** that must select `white_label_enabled, business_logo_url` and pass `whiteLabel`: `notifications/send`, `cron/send-reminders`, `attendance/mark`, `bookings/[id]/refund`, `cron/check-expiring-authorizations`
 
@@ -301,7 +303,7 @@ const whiteLabel = profile?.white_label_enabled && profile?.business_name
 - `RefundIssued`: retrieve card via `stripe.paymentIntents.retrieve` with `expand: ["payment_method"]`
 - `AccountVerified/Restricted`: via `account.updated` webhook — NOT in `/connect/return` (stale TODO there is intentional)
 
-**Design:** Indigo (#6366f1) info/CTA cards · Red: NoShowReceipt · Green: RefundIssued · Amber: AccountRestricted, PaymentFailed
+**Design:** Indigo (#6366f1) info/CTA cards · Red: NoShowReceipt · Green: RefundIssued, DisputeResolved (won) · Amber: AccountRestricted, PaymentFailed · Red: DisputeCreated, DisputeResolved (lost)
 
 ### Calendar
 
@@ -348,7 +350,9 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `(s
 
 **No `email` column** — get from `user` object via `getAuthenticatedUser()`.
 
-**`booking_confirmations.currency`** is source of truth for a booking's currency. Used throughout: `confirmation-status` → `EventCard` → `RefundModal`, `confirm/[token]`, `attendance/mark`, `bookings/[id]/refund`. Never hardcode `"eur"` or `"€"`.
+**`booking_confirmations.currency`** is source of truth for a confirmed booking's currency. Used throughout: `confirmation-status` → `EventCard` → `RefundModal`, `confirm/[token]`, `attendance/mark`, `bookings/[id]/refund`. Never hardcode `"eur"` or `"€"`.
+
+**`calendar_bookings.currency`** is source of truth for draft bookings (set at sync/create time from `profiles.currency`). Flows into `dashboard/page.tsx` currencyMap as seed; confirmation-level currency overwrites it once a confirmation exists.
 
 ### Migrations (all deployed to Supabase)
 - `001` — Stripe Connect fields, business onboarding
