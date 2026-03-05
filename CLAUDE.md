@@ -106,7 +106,7 @@ All 6 live. POST only, `Authorization: Bearer <CRON_SECRET>` required.
 | Auto-resend | No | Yes (max 3/booking) |
 | Per-appointment rules | No | Yes |
 | White-label email | No | Yes (opt-in) |
-| Stripe Express Dashboard | No | Yes |
+| Stripe Express Dashboard | Yes (verified only) | Yes (verified only) |
 
 **Pricing rules:** EU → EUR, rest → USD. Numeric price stays 39. Currency stored per booking. Derive symbol: `currency.toUpperCase() === "USD" ? "$" : "€"` — never hardcode `"eur"` or `"€"`.
 
@@ -127,11 +127,30 @@ All 6 live. POST only, `Authorization: Bearer <CRON_SECRET>` required.
 
 ### Booking States
 - **Draft:** 10-min window. Pro can edit protection rules. Manual send bypasses window. After expiry, cron auto-sends.
-- **Pending:** Confirmation sent, awaiting customer authorization.
+- **Pending:** Confirmation sent (or advance notice sent), awaiting customer authorization.
 - **Confirmed:** Card authorized, booking protected.
 
 ### Protection Rules
 Use `lib/noShowRules.ts` constants, never hardcode. Starter: global rules only. Pro: per-booking overrides. Overrides locked once confirmation is sent.
+
+### Advance Notice Flow (events >7 days out)
+
+**Problem:** Stripe card authorizations expire after 7 days. Sending a real `BookingConfirmation` for a far-future event results in an expired auth before the appointment.
+
+**Solution:** Two-phase email flow:
+1. **Advance notice** (`emails/AdvanceNotice.tsx`) — sent when the event is >7 days out. Informs client that card details will be requested closer to the date. Sets `calendar_bookings.notice_sent_at`. No `booking_confirmations` row created. Does NOT count toward Starter monthly limit.
+2. **Real confirmation** (`emails/BookingConfirmation.tsx`) — sent when event enters the 7-day window. Normal Stripe auth flow from this point on.
+
+**Sending rules:**
+- Manual click on "Send confirmation": if >7 days → sends advance notice (one-shot, second click returns 400); if ≤7 days → sends real confirmation
+- Cron (`send-draft-confirmation`): same branch logic. Query B picks up advance-noticed bookings now within 7 days for the real confirmation.
+- Advance notice is one per booking — `notice_sent_at` is the guard.
+
+**Dashboard UI after advance notice sent:**
+- Badge: "Notice sent" (blue)
+- Button: disabled, countdown "Resend available in X days" / "X hours" (last day) until `event_start - 7 days`
+- `advanceNoticeSent` field on `DashboardEvent` (from `events/list`, mapped from `notice_sent_at`)
+- `awaitingRealConfirmation = advanceNoticeSent && !confirmation` blocks `canSendConfirmation`
 
 ### Confirmation Flow
 
