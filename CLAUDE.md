@@ -95,6 +95,8 @@ All 6 live. POST only, `Authorization: Bearer <CRON_SECRET>` required.
 | `check-usage` | Daily 09:00 UTC | Warn Starter at 25/30 appointments; once/month |
 | `check-unresolved-attendance` | Every hour | Reminder to business at event_end+2h; auto-resolve as attended at event_end+24h |
 
+**`/api/cron/auto-confirm`** — intentionally disabled (returns `{ ok: true, disabled: true }`). The route is kept as a reserved slot in case auto-confirmation logic is needed in the future (e.g. Business plan, bulk flows). Do NOT delete it.
+
 ---
 
 ## 4. Plans & Pricing
