@@ -169,6 +169,13 @@ Do NOT add a new send path without this check. UI disables send buttons for non-
 
 **`draft_expires_at` must always be set** when creating `calendar_bookings` with `status = 'draft'`. Without it, the `lte` filter in `send-draft-confirmation` cron silently skips the booking forever.
 
+**Exception — first sync:** When a calendar is first connected, bookings are created with `draft_expires_at = NULL` intentionally. This prevents the cron from auto-firing confirmations to all existing clients the moment a business connects their calendar. The `first_sync_completed` flag on `google_connections` controls this:
+- `false` (default) → first sync → `draft_expires_at = NULL`, no auto-send
+- After the sync loop completes → flip to `true` → subsequent events use the normal 10-min window
+- Disconnecting resets to `false` so reconnecting re-triggers the first-sync behavior
+
+**First-sync modal:** After OAuth callback, `SettingsContent.tsx` triggers a sync and checks `firstSync: true` in the response. If true, it shows a one-time modal: "X events detected — review and send confirmations when ready." with an OK button. Business sends manually at their own pace. Implemented in `SettingsContent.tsx` (not `dashboard/page.tsx`) because both Google and Microsoft OAuth callbacks land on `/dashboard/settings?{provider}=connected`.
+
 ### Datetime Snapshot (`display_datetime`)
 
 **Problem solved:** Server-side `new Date(event_start).toLocaleTimeString()` runs in UTC (Vercel servers). A 14:00 local event shows as 12:00 in emails for UTC+2 users.
@@ -372,6 +379,8 @@ RLS on `appointment_attendance` and `appointment_no_show_overrides` must use `(s
 - `011` — `display_datetime` column on `calendar_bookings` (computed at sync/creation)
 - `012` — `display_datetime` column propagated to `booking_confirmations` (copied at confirmation send + resend)
 - `013` — Attendance reminder: `booking_confirmations.attendance_reminder_sent_at` (dedup), `profiles.attendance_reminder_enabled` (toggle, default true), `appointment_attendance.auto_resolved` (flag)
+- `014` — `calendar_bookings.currency` column (backfill from `profiles.currency` at sync time)
+- `015` — `google_connections.first_sync_completed` column (BOOLEAN DEFAULT false; guards first-sync auto-send prevention)
 
 ### Environment Variables
 
