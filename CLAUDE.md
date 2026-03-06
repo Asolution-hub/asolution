@@ -209,6 +209,8 @@ Before event start: no attendance actions. After start: "Mark attended" → rele
 ### Refunds & Disputes
 Refunds tracked in `stripe_refunds`, client notified. Disputes tracked in `stripe_disputes`, business notified immediately. Track `evidence_due_by` — limited response window.
 
+**Active dispute statuses** (used in Settings badge, DisputesModal, admin metrics — must be consistent across all three): `needs_response`, `warning_needs_response`, `under_review`, `warning_under_review`. Do NOT omit `warning_under_review`.
+
 ### Attendance Reminder & Auto-Resolve
 
 **Problem:** Businesses sometimes forget to mark attendance after an appointment ends, leaving PaymentIntent authorizations open indefinitely.
