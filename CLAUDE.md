@@ -147,8 +147,9 @@ Use `lib/noShowRules.ts` constants, never hardcode. Starter: global rules only. 
 
 **Sending rules:**
 - Manual click on "Send confirmation": if >7 days → sends advance notice (one-shot, second click returns 400); if ≤7 days → sends real confirmation
-- Cron (`send-draft-confirmation`): same branch logic. Query B picks up advance-noticed bookings now within 7 days for the real confirmation.
+- Cron (`send-draft-confirmation`): outer guard — if `hoursUntilEvent > 7 * 24`, always `continue` past the auth email path. Within that block: send advance notice only if cron (not manual) and `notice_sent_at` is null; otherwise skip silently. Query B picks up advance-noticed bookings now within 7 days for the real confirmation.
 - Advance notice is one per booking — `notice_sent_at` is the guard.
+- **Critical invariant:** A real Stripe auth email must NEVER be sent to an event >7 days away, from any code path. PIs expire after 7 days — sending one weeks early means the auth expires before the appointment.
 
 **Dashboard UI after advance notice sent:**
 - Badge: "Notice sent" (blue)
